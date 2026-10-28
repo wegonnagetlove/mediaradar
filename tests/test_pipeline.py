@@ -81,21 +81,24 @@ class FakeLLM:
         return json.dumps({"posts": [{"id": p["id"], "post": f"Заголовок {p['source']}\n\nТекст поста."} for p in picks]})
 
 
-def test_full_run_sends_ru_first(cfg, monkeypatch):
-    items = [mk("Designer exits house", 15), mk("Рэпер ушёл с лейбла", 30, region="ru", source="telegram", label="@chan")]
-    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: items)
+def test_full_run_sends_posts_with_photos(cfg, monkeypatch):
+    intl = mk("Designer exits house", 15)
+    intl.extra["images"] = ["https://img.test/a.jpg", "https://img.test/b.jpg"]
+    ru = mk("Рэпер ушёл с лейбла", 30, region="ru", source="telegram", label="@chan")
+    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: [intl, ru])
     monkeypatch.setattr(pipeline, "competitor_material", lambda *a, **k: [])
-    monkeypatch.setattr(pipeline.article, "fetch", lambda url: None)
+    monkeypatch.setattr(pipeline.article, "fetch", lambda url: pipeline.article.Article(url, None, "", "https://img.test/og.jpg"))
     monkeypatch.setattr(pipeline, "LLM", FakeLLM)
     sent = []
-    monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append(t) or True)
+    monkeypatch.setattr(pipeline.Telegram, "send_post", lambda self, text, **k: sent.append((text, k)) or True)
     secrets = config.Secrets("key", "bot", "chat", "", "", "")
     rep = pipeline.run("B", cfg=cfg, secrets=secrets)
-    assert rep.picks == 2 and rep.sent == 2
-    assert sent[0].startswith("⚡️ 2 новости: Заголовок @chan; Заголовок WWD")
-    assert sent[1].startswith("[Время публикации:") and "[Статус: не опубликовано ни у кого]" in sent[1]
-    assert "⚡️ Заголовок @chan" in sent[1]
-    # повторный запуск: всё уже видели, ничего не отправляется
+    assert rep.picks == 2 and rep.sent == 2 and len(sent) == 2
+    (t1, k1), (t2, k2) = sent
+    assert t1.startswith("⚡️ Заголовок @chan")                   # российский первым, без служебной шапки
+    assert k1["images"] == ["https://img.test/og.jpg"]          # фото со страницы источника
+    assert k2["images"] == ["https://img.test/a.jpg", "https://img.test/b.jpg"]  # фото из ленты важнее
+    assert k1["footer"].startswith('<a href="https://x.test/') and ">Источник</a>" in k1["footer"]
     sent.clear()
     rep2 = pipeline.run("B", cfg=cfg, secrets=secrets)
     assert rep2.candidates == 0 and sent == []

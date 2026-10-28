@@ -34,6 +34,7 @@ class Article:
     url: str
     published: datetime | None
     text: str
+    image: str = ""
 
 
 def _jsonld_dates(soup: BeautifulSoup) -> list[str]:
@@ -73,12 +74,19 @@ def parse(html: str, url: str) -> Article:
         t = soup.find("time", attrs={"datetime": True})
         published = parse_dt(t["datetime"]) if t else None
 
+    image = ""
+    for attr, val in (("property", "og:image"), ("name", "twitter:image"), ("property", "og:image:url")):
+        tag = soup.find("meta", attrs={attr: val})
+        if tag and tag.get("content", "").startswith("http"):
+            image = tag["content"]
+            break
+
     for junk in soup(["script", "style", "nav", "footer", "header", "aside", "form", "noscript"]):
         junk.decompose()
     body = soup.find("article") or soup.find("main") or soup.body or soup
     paras = [p.get_text(" ", strip=True) for p in body.find_all("p")]
     text = "\n".join(p for p in paras if len(p) > 40)
-    return Article(url=url, published=published, text=text[:6000])
+    return Article(url=url, published=published, text=text[:6000], image=image)
 
 
 def fetch(url: str) -> Article | None:

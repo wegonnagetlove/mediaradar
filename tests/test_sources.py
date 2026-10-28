@@ -102,3 +102,21 @@ def test_article_meta_time_and_text():
     a = article.parse(read("article.html"), "https://wwd.com/a/1")
     assert a.published == datetime(2026, 10, 28, 18, 31, tzinfo=timezone.utc)
     assert "five years" in a.text and "Short." not in a.text and "menu" not in a.text
+
+
+def test_images_from_sources():
+    feed = rss.parse_feed(read("rss.xml").encode(), label="WWD", region="intl")
+    assert feed[0].extra["images"] == ["https://wwd.com/img/1.jpg"]
+    assert feed[1].extra["images"] == ["https://wwd.com/img/0.jpg"]
+    posts = telegram.parse_channel(read("tg_channel.html"), "testchan")
+    assert posts[1]["images"] == ["https://cdn4.telesco.pe/file/abc.jpg"] and posts[0]["images"] == []
+    ig = instagram.parse_graph(json.loads(read("ig_graph.json")), "diet_prada", "intl")
+    assert ig[0].extra["images"] == ["https://cdn.ig/1.jpg", "https://cdn.ig/v.jpg"]   # карусель, у видео обложка
+    assert ig[1].extra["images"] == ["https://cdn.ig/2.jpg"]
+    ap = instagram.parse_apify(json.loads(read("apify.json")), {})
+    assert ap[0].extra["images"] == ["https://cdn.ig/c.jpg"] and "images" not in ap[1].extra
+
+
+def test_article_og_image():
+    html = read("article.html").replace("<head>", '<head><meta property="og:image" content="https://wwd.com/og.jpg">')
+    assert article.parse(html, "https://wwd.com/a/1").image == "https://wwd.com/og.jpg"

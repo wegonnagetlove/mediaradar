@@ -33,5 +33,6 @@ def get(url: str, *, params: dict | None = None, timeout: float = 20, retries: i
     raise last  # type: ignore[misc]
 
 
-def post(url: str, *, json: dict | None = None, data: dict | None = None, headers: dict | None = None, timeout: float = 120) -> requests.Response:
-    return _session.post(url, json=json, data=data, headers=headers, timeout=timeout)
+def post(url: str, *, json: dict | None = None, data: dict | None = None, files: dict | None = None,
+         headers: dict | None = None, timeout: float = 120) -> requests.Response:
+    return _session.post(url, json=json, data=data, files=files, headers=headers, timeout=timeout)

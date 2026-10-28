@@ -40,7 +40,8 @@ def normalize_accounts(raw: list) -> list[dict]:
     return out
 
 
-def _item(username: str, region: str, caption: str, url: str, ts, media_type: str = "") -> Item | None:
+def _item(username: str, region: str, caption: str, url: str, ts, media_type: str = "",
+          images: list[str] | None = None) -> Item | None:
     dt = parse_dt(ts)
     caption = (caption or "").strip()
     if not dt or not url:
@@ -50,7 +51,8 @@ def _item(username: str, region: str, caption: str, url: str, ts, media_type: st
     return Item(
         source="instagram", label=f"@{username} (Instagram)", region=region,
         title=title, url=url, published=dt, summary=caption[:1500], author=username,
-        time_basis="API", extra={"media_type": media_type} if media_type else {},
+        time_basis="API",
+        extra={k: v for k, v in (("media_type", media_type), ("images", [u for u in images or [] if u][:4])) if v},
     )
 
 
@@ -60,12 +62,19 @@ def graph_url(ig_user_id: str, version: str = "") -> str:
     return f"{GRAPH}/{version.strip('/')}/{ig_user_id}" if version else f"{GRAPH}/{ig_user_id}"
 
 
+def _graph_images(m: dict) -> list[str]:
+    def one(x: dict) -> str:
+        return x.get("thumbnail_url") if x.get("media_type") == "VIDEO" else (x.get("media_url") or x.get("thumbnail_url", ""))
+    children = ((m.get("children") or {}).get("data")) or []
+    return [one(c) for c in children] if children else [one(m)]
+
+
 def parse_graph(payload: dict, username: str, region: str) -> list[Item]:
     media = (((payload or {}).get("business_discovery") or {}).get("media") or {}).get("data") or []
     items = []
     for m in media:
         it = _item(username, region, m.get("caption", ""), m.get("permalink", ""), m.get("timestamp"),
-                   m.get("media_product_type") or m.get("media_type", ""))
+                   m.get("media_product_type") or m.get("media_type", ""), _graph_images(m))
         if it:
             items.append(it)
     return items
@@ -74,7 +83,8 @@ def parse_graph(payload: dict, username: str, region: str) -> list[Item]:
 def fetch_graph(account: dict, token: str, ig_user_id: str, *, per_account: int = 8, version: str = "") -> list[Item]:
     u = account["name"]
     fields = (f"business_discovery.username({u})"
-              f"{{username,media.limit({per_account}){{caption,timestamp,permalink,media_type,media_product_type}}}}")
+              f"{{username,media.limit({per_account}){{caption,timestamp,permalink,media_type,media_product_type,"
+              f"media_url,thumbnail_url,children{{media_type,media_url,thumbnail_url}}}}}}")
     try:
         r = net.get(graph_url(ig_user_id, version), params={"fields": fields, "access_token": token})
     except Exception as e:  # noqa: BLE001
@@ -97,8 +107,10 @@ def parse_apify(rows: list[dict], regions: dict[str, str]) -> list[Item]:
         url = row.get("url") or row.get("postUrl") or (
             f"https://www.instagram.com/p/{row['shortCode']}/" if row.get("shortCode") else "")
         ts = row.get("timestamp") or row.get("takenAtTimestamp") or row.get("taken_at")
+        imgs = [c.get("displayUrl", "") for c in row.get("childPosts") or []] or \
+            list(row.get("images") or []) or [row.get("displayUrl", "")]
         it = _item(user or "instagram", regions.get(user.lower(), "intl"),
-                   row.get("caption") or row.get("text") or "", url, ts, row.get("type", ""))
+                   row.get("caption") or row.get("text") or "", url, ts, row.get("type", ""), imgs)
         if it:
             items.append(it)
     return items

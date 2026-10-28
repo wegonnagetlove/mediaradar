@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from bs4 import BeautifulSoup
 
@@ -14,6 +15,17 @@ from ..models import CompetitorPost, Item
 from ..timeutil import parse_dt
 
 log = logging.getLogger("radar.telegram")
+
+_BG = re.compile(r"background-image:\s*url\(['\"]?([^'\")]+)['\"]?\)")
+
+
+def _photos(msg) -> list[str]:
+    urls = []
+    for el in msg.select(".tgme_widget_message_photo_wrap, .tgme_widget_message_video_thumb"):
+        m = _BG.search(el.get("style", ""))
+        if m and m.group(1).startswith("http"):
+            urls.append(m.group(1))
+    return urls[:4]
 
 
 def parse_channel(html: str, channel: str) -> list[dict]:
@@ -31,6 +43,7 @@ def parse_channel(html: str, channel: str) -> list[dict]:
             "published": parse_dt(time_el["datetime"]) if time_el else None,
             "url": link_el["href"] if link_el and link_el.has_attr("href") else f"https://t.me/{msg['data-post']}",
             "forwarded_from": fwd.get_text(strip=True) if fwd else "",
+            "images": _photos(msg),
         })
     return posts
 
@@ -64,7 +77,7 @@ def fetch(channel: str, *, label: str | None = None, region: str = "ru") -> list
             source="telegram", label=label or f"@{channel}", region=region,
             title=_title_from(p["text"]), url=p["url"], published=p["published"],
             summary=p["text"][:1200], time_basis="API",
-            extra={"forwarded_from": p["forwarded_from"]} if p["forwarded_from"] else {},
+            extra={k: v for k, v in (("forwarded_from", p["forwarded_from"]), ("images", p["images"])) if v},
         ))
     return items
 

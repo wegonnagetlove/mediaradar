@@ -17,7 +17,35 @@ NS = {
     "dc": "http://purl.org/dc/elements/1.1/",
     "content": "http://purl.org/rss/1.0/modules/content/",
     "rss1": "http://purl.org/rss/1.0/",
+    "media": "http://search.yahoo.com/mrss/",
 }
+
+
+def _images(e, html_parts: list[str]) -> list[str]:
+    """Картинка записи: media:content, media:thumbnail, enclosure или первый <img> в тексте."""
+    urls = []
+    for tag in ("media:content", "media:group/media:content", "media:thumbnail"):
+        for m in e.findall(tag, NS):
+            u = m.get("url", "")
+            kind = (m.get("medium") or m.get("type") or "image").lower()
+            if u and ("image" in kind or tag.endswith("thumbnail")):
+                urls.append(u)
+    for enc in e.findall("enclosure"):
+        if enc.get("type", "").startswith("image/") and enc.get("url"):
+            urls.append(enc.get("url"))
+    if not urls:
+        for part in html_parts:
+            if part and "<img" in part:
+                img = BeautifulSoup(part, "html.parser").find("img", src=True)
+                if img and img["src"].startswith("http"):
+                    urls.append(img["src"])
+                    break
+    seen, out = set(), []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out[:4]
 
 
 def _text(el, path: str) -> str:
@@ -59,6 +87,9 @@ def parse_feed(xml: bytes | str, *, label: str, region: str, source: str = "rss"
                       url=link, published=dt, summary=_clean(desc), author=author)
             if src is not None and src.get("url"):
                 it.extra["source_url"] = src.get("url")
+            imgs = _images(e, [_text(e, "description"), _text(e, "content:encoded")])
+            if imgs:
+                it.extra["images"] = imgs
             items.append(it)
         return items
 

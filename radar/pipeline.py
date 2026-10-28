@@ -180,6 +180,8 @@ def enrich(picks: list[dict], by_id: dict[str, Item], strict: bool, max_age: int
         elif strict and it.source in ("rss", "gnews"):
             log.info("отброшено, время не подтверждено страницей: %s", it.url)
             continue
+        if art and art.image and not it.extra.get("images"):
+            it.extra["images"] = [art.image]
         p["_item"] = it
         p["_text"] = art.text if art and art.text else ""
         out.append(p)
@@ -212,6 +214,15 @@ def header(it: Item, status: str, tz) -> str:
     t = it.published.astimezone(tz).strftime("%d.%m, %H:%M")
     basis = "" if it.time_basis in ("страница", "API") else f", время по: {it.time_basis}"
     return f"[Время публикации: {t}, {TZ_LABEL}{basis}] [Источник: {it.label}, {it.url}] [Статус: {status}]"
+
+
+def source_footer(it: Item, p: dict) -> str:
+    """Последняя строка дневного поста: ссылка на первоисточник и, если сюжет не эксклюзив, у кого он уже есть."""
+    foot = f'<a href="{html.escape(it.url, quote=True)}">Источник</a>'
+    status = (p.get("status") or "").strip()
+    if status and not p.get("exclusive", True):
+        foot += f" · {html.escape(status)}"
+    return foot
 
 
 def order(picks: list[dict]) -> list[dict]:
@@ -271,7 +282,7 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
     if mode.get("digest"):
         return _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state)
 
-    text_blocks: list[str] = []
+    posts_out: list[tuple[dict, str]] = []
     picks: list[dict] = []
     if cands:
         comp = competitor_material(cfg, state)
@@ -286,24 +297,23 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
             return report
         for p in picks:
             it = p["_item"]
-            body = posts.get(it.id) or f"{it.title}\n\n{it.summary[:500]}\n(текст поста не сгенерирован)"
+            body = posts.get(it.id) or f"{it.title}\n\n{it.summary[:500]}"
             if p.get("urgent") and not body.startswith("⚡"):
                 body = "⚡️ " + body
-            text_blocks.append(f"{header(it, p.get('status') or 'не проверено', tz)}\n\n{body}")
+            posts_out.append((p, body))
 
     state.meta["fail_streak"] = 0
-    if text_blocks:
-        titles = [b.split("\n\n", 1)[1].split("\n", 1)[0].lstrip("⚡️ ").strip() for b in text_blocks]
-        lead = ("⚡️ " if any(p.get("urgent") for p in picks) else "") + f"{plural_news(len(picks))}: " + "; ".join(titles)
-        report.digest = lead + "\n\n" + "\n\n———\n\n".join(text_blocks)
+    if posts_out:
+        report.digest = "\n\n———\n\n".join(f"{b}\n\n{p['_item'].url}" for p, b in posts_out)
         if not dry_run:
-            if notify_cfg.get("telegram") and tg.ready:
-                tg.send(lead)
-                for b in text_blocks:
-                    tg.send(b)
-            for p, t in zip(picks, titles):
-                state.mark_sent(t, p["_item"].url)
-            report.sent = len(text_blocks)
+            max_photos = int(notify_cfg.get("max_photos", 4)) if notify_cfg.get("photos", True) else 0
+            for p, body in posts_out:
+                it = p["_item"]
+                if notify_cfg.get("telegram") and tg.ready:
+                    tg.send_post(body, footer=source_footer(it, p) if notify_cfg.get("source_link", True) else "",
+                                 images=(it.extra.get("images") or [])[:max_photos], link=it.url)
+                state.mark_sent(body.lstrip("⚡️ ").split("\n", 1)[0][:160], it.url)
+            report.sent = len(posts_out)
     else:
         report.digest = "Пусто"
         if not dry_run and notify_cfg.get("send_empty") and tg.ready:
