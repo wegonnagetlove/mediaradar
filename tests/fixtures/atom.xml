@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><title>Blog</title>
+<entry><title>Museum director resigns</title><link rel="alternate" href="https://example.org/museum"/>
+<published>2026-10-28T18:10:00Z</published><summary>After a board dispute.</summary><author><name>A. Writer</name></author></entry>
+</feed>

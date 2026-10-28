@@ -1,0 +1,177 @@
+# ─────────────────────────────────────────────────────────────
+#  Newsroom Radar — настройки
+#  Правится только этот файл. Ключи API кладутся в Secrets GitHub, не сюда.
+# ─────────────────────────────────────────────────────────────
+
+channels: ["@aleko_n17", "@mozhetnesovpadat"]
+timezone: Europe/Moscow
+
+# ── Режимы ───────────────────────────────────────────────────
+# B: запуск по расписанию. Берётся всё, что опубликовано не раньше
+#    max_age_minutes назад и ещё не попадало в прошлые запуски
+#    (память в state/seen.json). Задержки GitHub не приводят ни к пропускам, ни к дублям.
+# A: разовый запуск руками (Actions → Run workflow → mode A).
+modes:
+  A: {max_age_minutes: 60, min_posts: 3, max_posts: 5}
+  B: {max_age_minutes: 60, min_posts: 0, max_posts: 3}
+
+# ── Движок ───────────────────────────────────────────────────
+# hybrid: код собирает ленты с точным временем, нейросеть отбирает и пишет. Рекомендуется.
+# agent:  нейросеть сама ищет в вебе по prompts/editor.md (как в чате). Нужен провайдер с веб-поиском.
+engine: hybrid
+
+# Дополнительный проход нейросети с веб-поиском по Instagram / Threads / X
+# (только anthropic и openai). Дороже, но ловит соцсети.
+social_search: true
+
+# Если время публикации не удалось подтвердить по самой странице
+# (meta article:published_time / JSON-LD), новость отбрасывается.
+# false: оставляется с пометкой «время по ленте».
+strict_time: false
+
+# ── Нейросеть ────────────────────────────────────────────────
+# provider: anthropic | openai | gemini | deepseek | openrouter | custom
+# Для custom задайте base_url любого OpenAI-совместимого API (Mistral, Groq, YandexGPT-шлюз, локальная Ollama).
+llm:
+  provider: anthropic
+  model: claude-sonnet-5-5          # для качества текста можно claude-opus-5-5
+  base_url: ""                      # только для custom
+  temperature: 0.6
+  max_tokens: 6000
+  # тип инструмента веб-поиска; менять только если провайдер обновит API
+  anthropic_web_search_tool: web_search_20250305
+  openai_web_search_tool: web_search
+
+# ── Telegram-уведомления ─────────────────────────────────────
+notify:
+  telegram: true          # TELEGRAM_BOT_TOKEN и TELEGRAM_CHAT_ID в Secrets
+  send_empty: false       # присылать ли «Пусто», когда новостей нет
+  silent_night: false     # тихие уведомления с 01:00 до 08:00 по МСК
+  save_digest: true       # архив выпусков в папке digests/
+
+# ── Конкуренты (проверка эксклюзивности) ─────────────────────
+# Публичные ленты t.me/s/<имя>: последние ~20 постов каждого канала.
+competitors_telegram:
+  - bloodysx
+  - ostorozhno_novosti
+  - ksbchk
+  - sncmag
+  - theblueprintru
+  - fashionprokachka
+
+# Российские медиа: сюжет, найденный у них за последние сутки, считается «уже есть».
+competitors_media:
+  - theblueprint.ru
+  - buro247.ru
+  - peopletalk.ru
+  - style.rbc.ru
+  - daily.afisha.ru
+  - pravilamag.ru
+  - thesymbol.ru
+
+# ── Источники ────────────────────────────────────────────────
+sources:
+  # Публичные телеграм-каналы, из которых брать новости (время поста точное).
+  # Добавляйте каналы инсайдеров, брендов, артистов, музеев.
+  telegram:
+    - {name: breakingmash, label: Mash, region: ru}
+    - {name: bazabazon, label: Baza, region: ru}
+    - {name: shot_shot, label: SHOT, region: ru}
+    - {name: tass_agency, label: ТАСС, region: ru}
+    - {name: rian_ru, label: РИА Новости, region: ru}
+    - {name: kommersant, label: Коммерсантъ, region: ru}
+
+  # Прямые RSS-ленты (время публикации из ленты).
+  rss:
+    - {url: "https://wwd.com/feed/", label: WWD, region: intl}
+    - {url: "https://fashionista.com/.rss/full/", label: Fashionista, region: intl}
+    - {url: "https://pagesix.com/feed/", label: Page Six, region: intl}
+    - {url: "https://variety.com/feed/", label: Variety, region: intl}
+    - {url: "https://deadline.com/feed/", label: Deadline, region: intl}
+    - {url: "https://www.hollywoodreporter.com/feed/", label: The Hollywood Reporter, region: intl}
+    - {url: "https://www.billboard.com/feed/", label: Billboard, region: intl}
+    - {url: "https://pitchfork.com/rss/news/", label: Pitchfork, region: intl}
+    - {url: "https://news.artnet.com/feed", label: Artnet News, region: intl}
+    - {url: "https://www.artnews.com/feed/", label: ARTnews, region: intl}
+    - {url: "https://www.dezeen.com/feed/", label: Dezeen, region: intl}
+    - {url: "https://hypebeast.com/feed", label: Hypebeast, region: intl}
+
+  # Google News: поиск по сайтам и темам с окном when:1h.
+  # Покрывает издания без RSS и российскую повестку.
+  google_news:
+    ru:
+      - "ЦУМ OR ДЛТ OR KM20 OR \"Модный дом\""
+      - "креативный директор назначен OR покинул бренд"
+      - "российский бренд одежды открытие OR закрытие OR коллаборация"
+      - "директор музея назначен OR уволен OR отставка"
+      - "певец OR певица OR рэпер суд OR иск OR расставание OR скандал"
+      - "лейбл артист конфликт OR контракт OR права на песни"
+      - "главный редактор журнал назначен OR покидает"
+      - "Beinopen OR \"Fashion Consulting Group\" рынок одежды"
+      - "аукцион продана картина рекорд Россия"
+      - "site:tass.ru культура"
+      - "site:kommersant.ru мода OR культура OR шоу-бизнес"
+    intl:
+      - "site:businessoffashion.com"
+      - "site:voguebusiness.com"
+      - "site:thecut.com"
+      - "site:airmail.news"
+      - "site:puck.news"
+      - "site:theartnewspaper.com"
+      - "site:highsnobiety.com"
+      - "site:dazeddigital.com"
+      - "site:archdaily.com"
+      - "creative director appointed OR exits fashion house"
+      - "luxury group acquisition OR stake OR CEO steps down"
+      - "Diet Prada OR stylenotcom"
+
+# ── Instagram напрямую ───────────────────────────────────────
+# Instagram принадлежит Meta, признанной экстремистской и запрещённой в РФ;
+# публичные аккаунты используются только как новостные источники.
+# Посты приходят с точным временем публикации. Подключение: README → «Instagram».
+#
+# provider: graph  официальный Instagram Graph API (Business Discovery), бесплатно.
+#                  Secrets: IG_ACCESS_TOKEN, IG_USER_ID. Видит бизнес- и авторские аккаунты.
+#           apify  платный парсер публичных постов. Secret: APIFY_TOKEN.
+# У любого аккаунта можно указать feed: <url RSS-моста>, тогда он читается по RSS
+# независимо от provider (пригодится для личных профилей, которых не видит graph).
+instagram:
+  enabled: true
+  provider: graph
+  per_account: 8              # сколько последних постов смотреть у каждого аккаунта
+  min_interval_minutes: 0     # для apify поставьте 30–60, чтобы не платить за каждый запуск
+  graph_api_version: ""       # пусто: версия по умолчанию вашего приложения Meta
+  apify_actor: apify~instagram-post-scraper
+  apify_input: {}             # дополнительные поля входа актора, если понадобятся
+  accounts:
+    # международная индустрия
+    - diet_prada
+    - stylenotcom
+    - hautelemode
+    - ideservecouture
+    - voguerunway
+    - voguebusiness
+    - bof
+    - wwd
+    - theimpression_
+    - databutmakeitfashion
+    - highsnobiety
+    - hypebeast
+    # российские аккаунты (артисты, бренды, редакторы, музеи) добавляйте так:
+    # - {name: имя_аккаунта, region: ru}
+    # - {name: имя_аккаунта, region: ru, feed: "https://ваш-rsshub/picnob/user/имя_аккаунта"}
+
+# ── Поиск по соцсетям нейросетью (social_search) ─────────────
+# Дополняет прямой Instagram: Threads и X не отдают чужие посты бесплатно,
+# поэтому их ищет нейросеть с веб-поиском (anthropic, openai, openrouter).
+social_accounts:
+  instagram: ["diet_prada", "stylenotcom", "hautelemode", "ideservecouture"]
+  threads: ["diet_prada", "stylenotcom", "bof", "wwd", "voguebusiness"]
+  x: ["wwd", "BoF", "VVFriedman"]
+
+# ── Отбор ────────────────────────────────────────────────────
+topics_hint: >
+  мода и люкс, культура и светская хроника, музыка, кино и стриминг,
+  архитектура и дизайн, искусство и арт-рынок, соцсети и диджитал-культура, бизнес индустрии
+stop_topics: []           # например ["спорт", "погода"]
+max_candidates_to_llm: 60 # сколько свежих заголовков отдавать на отбор за запуск

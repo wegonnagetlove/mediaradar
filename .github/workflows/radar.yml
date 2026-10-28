@@ -1,0 +1,81 @@
+name: Радар новостей
+
+on:
+  schedule:
+    # каждые 15 минут, круглосуточно (UTC). GitHub запускает с задержкой до 5–15 минут,
+    # память радара (state/seen.json) не даёт ни пропусков, ни дублей.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Режим: A — разовый (3–5 новостей за час), B — как по расписанию"
+        type: choice
+        options: [A, B]
+        default: A
+      action:
+        description: "run — запуск; dry-run — без отправки; check — проверить источники"
+        type: choice
+        options: [run, dry-run, check]
+        default: run
+
+concurrency:
+  group: radar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Память радара
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}
+          restore-keys: radar-state-
+
+      - name: Запуск
+        run: |
+          ACTION="${{ inputs.action || 'run' }}"
+          MODE="${{ inputs.mode || 'B' }}"
+          case "$ACTION" in
+            check)   python -m radar -v check ;;
+            dry-run) python -m radar -v run --mode "$MODE" --dry-run ;;
+            *)       python -m radar -v run --mode "$MODE" ;;
+          esac
+
+      - name: Сохранить память
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}
+
+      - name: Архив выпусков
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_id }}
+          path: digests/
+          if-no-files-found: ignore
+          retention-days: 14
