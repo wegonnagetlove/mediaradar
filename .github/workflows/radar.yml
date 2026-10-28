@@ -2,15 +2,17 @@ name: Радар новостей
 
 on:
   schedule:
-    # каждые 15 минут, круглосуточно (UTC). GitHub запускает с задержкой до 5–15 минут,
+    # Время в UTC, Москва = UTC+3. GitHub запускает с задержкой обычно до 5–15 минут;
     # память радара (state/seen.json) не даёт ни пропусков, ни дублей.
-    - cron: "*/15 * * * *"
+    - cron: "55 3 * * *"             # 06:55 МСК: утренний выпуск за ночь (режим D)
+    - cron: "15,30,45 4 * * *"       # 07:15, 07:30, 07:45 МСК: режим B
+    - cron: "*/15 5-20 * * *"        # 08:00–23:45 МСК каждые 15 минут: режим B
   workflow_dispatch:
     inputs:
       mode:
-        description: "Режим: A — разовый (3–5 новостей за час), B — как по расписанию"
+        description: "Режим: A разовый (3–5 новостей за час), B как днём по расписанию, D утренний выпуск"
         type: choice
-        options: [A, B]
+        options: [A, B, D]
         default: A
       action:
         description: "run — запуск; dry-run — без отправки; check — проверить источники"
@@ -58,6 +60,7 @@ jobs:
         run: |
           ACTION="${{ inputs.action || 'run' }}"
           MODE="${{ inputs.mode || 'B' }}"
+          if [ "${{ github.event.schedule }}" = "55 3 * * *" ]; then MODE=D; fi
           case "$ACTION" in
             check)   python -m radar -v check ;;
             dry-run) python -m radar -v run --mode "$MODE" --dry-run ;;

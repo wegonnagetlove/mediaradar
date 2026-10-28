@@ -2,6 +2,7 @@
 
 python -m radar run --mode B            обычный запуск (по расписанию)
 python -m radar run --mode A            разовый запуск
+python -m radar run --mode D            утренний выпуск за ночь
 python -m radar run --dry-run           всё, кроме отправки и записи памяти
 python -m radar run --no-llm            только сбор: показать свежих кандидатов без нейросети
 python -m radar check                   проверить каждый источник и вывести, сколько он отдаёт
@@ -87,7 +88,7 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="radar", description="Newsroom Radar")
     sub = p.add_subparsers(dest="cmd")
     r = sub.add_parser("run")
-    r.add_argument("--mode", default=os.environ.get("RADAR_MODE", "B"), choices=["A", "B", "a", "b"])
+    r.add_argument("--mode", default=os.environ.get("RADAR_MODE", "B"), choices=["A", "B", "D", "a", "b", "d"])
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--no-llm", action="store_true")
     sub.add_parser("check")

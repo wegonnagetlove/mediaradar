@@ -128,3 +128,58 @@ def test_prompts_format_without_errors(cfg):
                                       stop_topics="", candidates="[]", competitor_posts="")
     config.prompt("writer.md").format(channels="", now="", picks="[]")
     config.prompt("social.md").format(now="", now_utc="", max_age=60, instagram="", threads="", x="")
+
+
+class FakeDigestLLM(FakeLLM):
+    def complete(self, system, user, *, web_search=False, max_searches=8):
+        cands = json.loads(user.split("КАНДИДАТЫ (JSON)\n", 1)[1].split("\n\nПОСЛЕДНИЕ", 1)[0])
+        picks = [{"id": c["id"], "region": c["region"], "headline": f"H&M <{c['title']}>",
+                  "line": "Сделка на $5 млн.", "exclusive": i != 1, "status": "уже есть у @ksbchk" if i == 1 else "",
+                  "urgent": i == 0} for i, c in enumerate(cands)]
+        return json.dumps({"picks": picks + picks[:1]})  # дубль должен отсеяться
+
+
+def test_morning_digest_html_list(cfg, monkeypatch):
+    items = [mk(f"Ночная новость {i}", 30 + i * 20, region="ru" if i % 2 else "intl") for i in range(25)]
+    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: items)
+    monkeypatch.setattr(pipeline, "competitor_material", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline.article, "fetch", lambda url: None)
+    monkeypatch.setattr(pipeline, "LLM", FakeDigestLLM)
+    sent = []
+    monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append((t, k)) or True)
+    rep = pipeline.run("D", cfg=cfg, secrets=config.Secrets("key", "bot", "chat", "", "", ""))
+    assert rep.picks == 20 and rep.sent == 20
+    full = "\n\n".join(t for t, _ in sent)
+    assert all(k.get("html") for _, k in sent)
+    assert full.startswith("<b>Утренний выпуск,")
+    assert "20 новостей за ночь" in full
+    assert full.index("<b>Россия</b>") < full.index("<b>Мир</b>")
+    assert '<a href="https://x.test/' in full and "H&amp;M &lt;Ночная новость" in full
+    assert "1. ⚡️ <a href" in full and "уже есть у @ksbchk" in full
+    assert all(len(t) <= 4000 for t, _ in sent)
+    # дневной запуск после выпуска ничего не повторяет
+    sent.clear()
+    monkeypatch.setattr(pipeline, "LLM", FakeLLM)
+    rep2 = pipeline.run("B", cfg=cfg, secrets=config.Secrets("key", "bot", "chat", "", "", ""))
+    assert rep2.candidates == 0 and sent == []
+
+
+def test_morning_digest_empty(cfg, monkeypatch):
+    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline, "LLM", FakeDigestLLM)
+    sent = []
+    monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append(t) or True)
+    pipeline.run("D", cfg=cfg, secrets=config.Secrets("key", "bot", "chat", "", "", ""))
+    assert len(sent) == 1 and "подходящих новостей нет" in sent[0]
+
+
+def test_digest_prompt_formats():
+    config.prompt("digest.md").format(channels="", now="", hours=7.5, max_posts=20, topics="", stop_topics="",
+                                      candidates="[]", competitor_posts="")
+
+
+def test_schedule_covers_moscow_day():
+    import yaml
+    wf = yaml.safe_load(open(config.ROOT / ".github/workflows/radar.yml", encoding="utf-8"))
+    crons = [c["cron"] for c in wf[True]["schedule"]]  # PyYAML читает ключ on как True
+    assert "55 3 * * *" in crons and "*/15 5-20 * * *" in crons

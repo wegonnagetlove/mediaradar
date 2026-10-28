@@ -48,16 +48,40 @@ class Telegram:
     def ready(self) -> bool:
         return bool(self.token and self.chat_id)
 
-    def send(self, text: str, *, preview: bool = False) -> bool:
+    def send(self, text: str, *, preview: bool = False, html: bool = False) -> bool:
         ok = True
-        for part in split(text):
-            r = net.post(f"https://api.telegram.org/bot{self.token}/sendMessage", json={
+        for part in (split(text) if not html else [text]):
+            body = {
                 "chat_id": self.chat_id,
                 "text": part,
                 "disable_notification": self.silent,
                 "link_preview_options": {"is_disabled": not preview},
-            }, timeout=30)
+            }
+            if html:
+                body["parse_mode"] = "HTML"
+            r = net.post(f"https://api.telegram.org/bot{self.token}/sendMessage", json=body, timeout=30)
             if r.status_code != 200:
                 log.error("Telegram: HTTP %s %s", r.status_code, r.text[:200])
                 ok = False
         return ok
+
+    def send_list(self, head: str, lines: list[str]) -> bool:
+        """HTML-список: режется только между пунктами, чтобы не порвать ссылку."""
+        ok = True
+        for chunk in pack(head, lines):
+            ok = self.send(chunk, html=True) and ok
+        return ok
+
+
+def pack(head: str, lines: list[str], limit: int = 3800) -> list[str]:
+    chunks, buf = [], head
+    for line in lines:
+        candidate = f"{buf}\n\n{line}" if buf else line
+        if len(candidate) > limit and buf:
+            chunks.append(buf)
+            buf = line
+        else:
+            buf = candidate
+    if buf:
+        chunks.append(buf)
+    return chunks

@@ -1,6 +1,7 @@
 """Один запуск радара: собрать → отсеять → отобрать → написать → отправить."""
 from __future__ import annotations
 
+import html
 import json
 import logging
 import re
@@ -257,7 +258,7 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
     fresh = select_candidates(items, cfg, state, max_age, now)
     report.fresh = len(fresh)
     fresh.sort(key=lambda i: (i.region != "ru", -i.published.timestamp()))
-    cands = fresh[: int(cfg.get("max_candidates_to_llm", 60))]
+    cands = fresh[: int(mode.get("max_candidates") or cfg.get("max_candidates_to_llm", 60))]
     report.candidates = len(cands)
 
     if no_llm or not llm:
@@ -266,6 +267,9 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
             state.mark_seen(i.id for i in cands)
             state.save()
         return report
+
+    if mode.get("digest"):
+        return _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state)
 
     text_blocks: list[str] = []
     picks: list[dict] = []
@@ -360,3 +364,84 @@ def _save_digest(cfg, report: Report, now: datetime) -> None:
     path = config.ROOT / "digests" / local.strftime("%Y-%m-%d") / f"{local:%H%M}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(report.digest + "\n", encoding="utf-8")
+
+
+# ── утренний выпуск ──────────────────────────────────────────────────────
+
+def digest_triage(llm: LLM, cfg, mode: dict, cands: list[Item], comp: list[CompetitorPost], now: datetime) -> list[dict]:
+    tz = cfg.tz
+    comp_json = [{"channel": c.channel, "text": c.text[:300]} for c in comp]
+    prompt = config.prompt("digest.md").format(
+        channels=", ".join(cfg["channels"]), now=now.astimezone(tz).strftime("%d.%m.%Y %H:%M"),
+        hours=round(mode["max_age_minutes"] / 60, 1), max_posts=mode["max_posts"],
+        topics=" ".join(str(cfg.get("topics_hint", "")).split()), stop_topics=", ".join(cfg.get("stop_topics") or []) or "нет",
+        candidates=json.dumps([c.for_llm(tz) for c in cands], ensure_ascii=False),
+        competitor_posts=json.dumps(comp_json, ensure_ascii=False) if comp_json else "нет данных",
+    )
+    data = extract_json(llm.complete("Ты выпускающий редактор утреннего выпуска. Отвечаешь только JSON.", prompt))
+    picks = data.get("picks", []) if isinstance(data, dict) else []
+    ids = {c.id for c in cands}
+    out, used = [], set()
+    for p in picks:
+        if p.get("id") in ids and p["id"] not in used and p.get("headline"):
+            used.add(p["id"])
+            out.append(p)
+    return out[: mode["max_posts"]]
+
+
+def digest_lines(picks: list[dict], tz) -> list[str]:
+    """Строки выпуска в HTML Telegram: заголовок‑ссылка, одна фраза, источник и время."""
+    lines, n = [], 0
+    for region, title in (("ru", "Россия"), ("intl", "Мир")):
+        group = [p for p in picks if p["_item"].region == region]
+        if not group:
+            continue
+        lines.append(f"<b>{title}</b>")
+        for p in group:
+            n += 1
+            it: Item = p["_item"]
+            flash = "⚡️ " if p.get("urgent") else ""
+            head = f'{n}. {flash}<a href="{html.escape(it.url, quote=True)}">{html.escape(p["headline"].strip())}</a>'
+            meta = f"{html.escape(it.label)}, {it.published.astimezone(tz):%H:%M}"
+            status = (p.get("status") or "").strip()
+            if status and not p.get("exclusive", True):
+                meta += f"; {html.escape(status)}"
+            line = html.escape((p.get("line") or "").strip())
+            lines.append(f"{head}\n{line} <i>{meta}</i>" if line else f"{head}\n<i>{meta}</i>")
+    return lines
+
+
+def _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state) -> Report:
+    tz = cfg.tz
+    local = now.astimezone(tz)
+    picks: list[dict] = []
+    if cands:
+        comp = competitor_material(cfg, state)
+        try:
+            picks = digest_triage(llm, cfg, mode, cands, comp, now)
+            by_id = {c.id: c for c in cands}
+            picks = enrich(picks, by_id, bool(cfg.get("strict_time")), int(mode["max_age_minutes"]), now)
+        except (LLMError, ValueError) as e:
+            _fail(state, tg, report, f"утренний выпуск: {e}", dry_run)
+            return report
+    state.meta["fail_streak"] = 0
+    report.picks = len(picks)
+    start = (now - timedelta(minutes=int(mode["max_age_minutes"]))).astimezone(tz)
+    if picks:
+        head = (f"<b>Утренний выпуск, {local:%d.%m}</b>\n"
+                f"{plural_news(len(picks))} за ночь, с {start:%H:%M} до {local:%H:%M} МСК")
+        lines = digest_lines(picks, tz)
+    else:
+        head = f"<b>Утренний выпуск, {local:%d.%m}</b>\nЗа ночь подходящих новостей нет."
+        lines = []
+    report.digest = head + ("\n\n" + "\n\n".join(lines) if lines else "")
+    if not dry_run:
+        if tg.ready:
+            tg.send_list(head, lines)
+            report.sent = len(picks)
+        for p in picks:
+            state.mark_sent(p["headline"], p["_item"].url)
+        state.mark_seen(i.id for i in cands)
+        state.save()
+        _save_digest(cfg, report, now)
+    return report
