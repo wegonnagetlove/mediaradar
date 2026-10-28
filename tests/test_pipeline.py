@@ -151,11 +151,13 @@ def test_morning_digest_html_list(cfg, monkeypatch):
     assert rep.picks == 20 and rep.sent == 20
     full = "\n\n".join(t for t, _ in sent)
     assert all(k.get("html") for _, k in sent)
-    assert full.startswith("<b>Утренний выпуск,")
-    assert "20 новостей за ночь" in full
-    assert full.index("<b>Россия</b>") < full.index("<b>Мир</b>")
-    assert '<a href="https://x.test/' in full and "H&amp;M &lt;Ночная новость" in full
-    assert "1. ⚡️ <a href" in full and "уже есть у @ksbchk" in full
+    assert full.startswith("Доброе утро!\n\n<a href=")
+    blocks = full.split("\n\n")[1:]
+    assert len(blocks) == 20 and all(b.startswith('<a href="https://x.test/') and b.endswith("</a>") for b in blocks)
+    assert "H&amp;M &lt;Ночная новость" in full
+    assert "Сделка" not in full and "@ksbchk" not in full and "⚡" not in full   # только заголовки‑ссылки
+    first_intl = next(i for i, b in enumerate(blocks) if any(it.url in b for it in items if it.region == "intl"))
+    assert all(any(it.url in b for it in items if it.region == "ru") for b in blocks[:first_intl])
     assert all(len(t) <= 4000 for t, _ in sent)
     # дневной запуск после выпуска ничего не повторяет
     sent.clear()
@@ -170,7 +172,7 @@ def test_morning_digest_empty(cfg, monkeypatch):
     sent = []
     monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append(t) or True)
     pipeline.run("D", cfg=cfg, secrets=config.Secrets("key", "bot", "chat", "", "", ""))
-    assert len(sent) == 1 and "подходящих новостей нет" in sent[0]
+    assert sent == ["Доброе утро! За ночь ничего важного не случилось."]
 
 
 def test_digest_prompt_formats():

@@ -389,26 +389,11 @@ def digest_triage(llm: LLM, cfg, mode: dict, cands: list[Item], comp: list[Compe
     return out[: mode["max_posts"]]
 
 
-def digest_lines(picks: list[dict], tz) -> list[str]:
-    """Строки выпуска в HTML Telegram: заголовок‑ссылка, одна фраза, источник и время."""
-    lines, n = [], 0
-    for region, title in (("ru", "Россия"), ("intl", "Мир")):
-        group = [p for p in picks if p["_item"].region == region]
-        if not group:
-            continue
-        lines.append(f"<b>{title}</b>")
-        for p in group:
-            n += 1
-            it: Item = p["_item"]
-            flash = "⚡️ " if p.get("urgent") else ""
-            head = f'{n}. {flash}<a href="{html.escape(it.url, quote=True)}">{html.escape(p["headline"].strip())}</a>'
-            meta = f"{html.escape(it.label)}, {it.published.astimezone(tz):%H:%M}"
-            status = (p.get("status") or "").strip()
-            if status and not p.get("exclusive", True):
-                meta += f"; {html.escape(status)}"
-            line = html.escape((p.get("line") or "").strip())
-            lines.append(f"{head}\n{line} <i>{meta}</i>" if line else f"{head}\n<i>{meta}</i>")
-    return lines
+def digest_lines(picks: list[dict], tz=None) -> list[str]:
+    """Строки утреннего выпуска: только заголовок‑ссылка, сначала Россия, потом мир."""
+    ordered = [p for p in picks if p["_item"].region == "ru"] + [p for p in picks if p["_item"].region != "ru"]
+    return [f'<a href="{html.escape(p["_item"].url, quote=True)}">{html.escape(p["headline"].strip())}</a>'
+            for p in ordered]
 
 
 def _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state) -> Report:
@@ -426,14 +411,8 @@ def _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state) -> Repor
             return report
     state.meta["fail_streak"] = 0
     report.picks = len(picks)
-    start = (now - timedelta(minutes=int(mode["max_age_minutes"]))).astimezone(tz)
-    if picks:
-        head = (f"<b>Утренний выпуск, {local:%d.%m}</b>\n"
-                f"{plural_news(len(picks))} за ночь, с {start:%H:%M} до {local:%H:%M} МСК")
-        lines = digest_lines(picks, tz)
-    else:
-        head = f"<b>Утренний выпуск, {local:%d.%m}</b>\nЗа ночь подходящих новостей нет."
-        lines = []
+    head = "Доброе утро!" if picks else "Доброе утро! За ночь ничего важного не случилось."
+    lines = digest_lines(picks)
     report.digest = head + ("\n\n" + "\n\n".join(lines) if lines else "")
     if not dry_run:
         if tg.ready:
