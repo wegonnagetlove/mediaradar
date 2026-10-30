@@ -181,6 +181,17 @@ def social_scan(llm: LLM, cfg: config.Config, max_age: int, now: datetime, state
 
 # ── отбор и текст ────────────────────────────────────────────────────────
 
+POLICIES = {
+    # быть в курсе: всё по темам, что является новостью; уже вышедшее у конкурентов тоже, с пометкой
+    "aware": ("Задача: редактор должен быть в курсе всего важного по своим темам. Бери каждую настоящую новость "
+              "по темам, в том числе если она уже есть у конкурентов или федеральных СМИ: тогда exclusive=false "
+              "и в status укажи, у кого она есть. Отсеивай только шум."),
+    # только эксклюзивы: то, чего ещё нет у конкурентов
+    "exclusive": ("Задача: опубликовать первыми. Бери только сюжеты, которых ещё нет у конкурентов из списка "
+                  "и у конкурирующих медиа (in_competitor_media=true). Есть только у агентств и федеральных СМИ: "
+                  "можно взять, exclusive=false."),
+}
+
 def triage(llm: LLM, cfg, mode: dict, cands: list[Item], comp: list[CompetitorPost], now: datetime) -> list[dict]:
     tz = cfg.tz
     comp_json = [{"channel": c.channel, "time": c.published.astimezone(tz).strftime("%d.%m %H:%M") if c.published else "",
@@ -191,6 +202,7 @@ def triage(llm: LLM, cfg, mode: dict, cands: list[Item], comp: list[CompetitorPo
         topics=" ".join(str(cfg.get("topics_hint", "")).split()), stop_topics=", ".join(cfg.get("stop_topics") or []) or "нет",
         candidates=json.dumps([c.for_llm(tz) for c in cands], ensure_ascii=False),
         competitor_posts=json.dumps(comp_json, ensure_ascii=False) if comp_json else "нет данных",
+        policy=POLICIES.get(str(cfg.get("selection", "aware")), POLICIES["aware"]),
     )
     data = extract_json(llm.complete("Ты выпускающий редактор. Отвечаешь только JSON.", prompt))
     picks = data.get("picks", []) if isinstance(data, dict) else []

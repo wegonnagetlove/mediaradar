@@ -130,7 +130,9 @@ def test_llm_failure_counts_streak(cfg, monkeypatch, tmp_path):
 
 def test_prompts_format_without_errors(cfg):
     config.prompt("triage.md").format(channels="", now="", max_age=60, max_posts=3, min_posts=0, topics="",
-                                      stop_topics="", candidates="[]", competitor_posts="")
+                                      stop_topics="", candidates="[]", competitor_posts="",
+                                      policy=pipeline.POLICIES["aware"])
+    assert config.load()["selection"] == "aware"
     config.prompt("writer.md").format(channels="", now="", picks="[]")
     config.prompt("social.md").format(now="", now_utc="", max_age=60, instagram="", threads="", x="")
 

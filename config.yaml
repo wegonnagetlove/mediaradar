@@ -26,7 +26,7 @@ schedule:
 # A: разовый запуск руками (Actions → Run workflow → mode A), работает в любое время.
 modes:
   A: {max_age_minutes: 60, min_posts: 3, max_posts: 5}
-  B: {max_age_minutes: 60, min_posts: 0, max_posts: 3}
+  B: {max_age_minutes: 60, min_posts: 0, max_posts: 5}
   D: {max_age_minutes: 450, min_posts: 0, max_posts: 20, max_candidates: 150, digest: true}
 
 # ── Движок ───────────────────────────────────────────────────
@@ -196,5 +196,8 @@ social_accounts:
 topics_hint: >
   мода и люкс, культура и светская хроника, музыка, кино и стриминг,
   архитектура и дизайн, искусство и арт-рынок, соцсети и диджитал-культура, бизнес индустрии
+# aware: присылать всё важное по темам, даже если уже вышло у конкурентов (с пометкой «уже есть у …»)
+# exclusive: только то, чего ещё нет у конкурентов
+selection: aware
 stop_topics: []           # например ["спорт", "погода"]
 max_candidates_to_llm: 60 # сколько свежих заголовков отдавать на отбор за запуск
