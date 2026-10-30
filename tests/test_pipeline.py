@@ -375,3 +375,14 @@ def test_every_throttles(tmp_path):
     assert not pipeline.every(st, "google_news", 15, t0 + timedelta(minutes=5))
     assert pipeline.every(st, "google_news", 15, t0 + timedelta(minutes=15))
     assert pipeline.every(st, "x", 0, t0)
+
+
+
+def test_balance_gives_every_source_a_place():
+    noisy = [mk(f"Шум {i}", i, region="ru", label="@breakingmash", source="telegram") for i in range(80)]
+    wwd = [mk(f"WWD {i}", 30 + i, label="WWD") for i in range(5)]
+    dezeen = [mk("Dezeen 1", 50, label="Dezeen")]
+    out = pipeline.balance(noisy + wwd + dezeen, 20)
+    labels = [i.label for i in out]
+    assert len(out) == 20 and labels.count("WWD") == 5 and labels.count("Dezeen") == 1
+    assert labels[0] == "@breakingmash"                          # российские всё равно первыми

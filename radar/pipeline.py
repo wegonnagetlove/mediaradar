@@ -149,6 +149,25 @@ def _social_names(raw) -> list[dict]:
     return out
 
 
+def balance(items: list[Item], limit: int) -> list[Item]:
+    """Места в отборе делятся между источниками по кругу, самые свежие первыми.
+
+    Иначе шумные каналы общей повестки (десятки постов в час) вытесняют профильные издания.
+    """
+    groups: dict[str, list[Item]] = {}
+    for it in sorted(items, key=lambda i: -i.published.timestamp()):
+        groups.setdefault(it.label, []).append(it)
+    out: list[Item] = []
+    queues = sorted(groups.values(), key=lambda g: (g[0].region != "ru", -g[0].published.timestamp()))
+    while len(out) < limit and any(queues):
+        for q in queues:
+            if q and len(out) < limit:
+                out.append(q.pop(0))
+        queues = [q for q in queues if q]
+    out.sort(key=lambda i: (i.region != "ru", -i.published.timestamp()))
+    return out
+
+
 def social_scan(llm: LLM, cfg: config.Config, max_age: int, now: datetime, state: State | None = None) -> list[Item]:
     raw = cfg.get("social_accounts") or {}
     per_run = int(raw.get("per_run", 12)) if isinstance(raw, dict) else 12
@@ -397,8 +416,7 @@ def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Teleg
 
     fresh = select_candidates(items, cfg, state, max_age, now)
     report.fresh = len(fresh)
-    fresh.sort(key=lambda i: (i.region != "ru", -i.published.timestamp()))
-    cands = fresh[: int(mode.get("max_candidates") or cfg.get("max_candidates_to_llm", 60))]
+    cands = balance(fresh, int(mode.get("max_candidates") or cfg.get("max_candidates_to_llm", 60)))
     report.candidates = len(cands)
 
     if no_llm or not llm:
