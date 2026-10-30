@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -266,6 +267,8 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
     if use_tg:
         problem = tg.check()
         if problem:
+            if "TELEGRAM_BOT_TOKEN" in problem:
+                problem += ". Что лежит в секрете: " + config.describe_token(os.environ.get("TELEGRAM_BOT_TOKEN", ""))
             report.warnings.append(f"Telegram: {problem}")
             report.failed = True
             tg.token = ""  # дальше не пытаемся слать в заведомо неверный чат

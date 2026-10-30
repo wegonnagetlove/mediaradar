@@ -79,3 +79,15 @@ def test_html_parse_error_falls_back_to_plain(monkeypatch):
     monkeypatch.setattr(notify.net, "post", post)
     tg = notify.Telegram("t", "c")
     assert tg.send("<b>сломано", html=True) and "parse_mode" not in calls[1]["json"] and not tg.errors
+
+
+def test_clean_token_variants():
+    from radar.config import clean_token, describe_token
+    t = "9096675184:AAE1FS3AuWK6junhNg4QGvlV9-vF82WJbfX"
+    for raw in (t, f" {t}\n", f"bot{t}", f"Use this token to access the HTTP API:\n{t}\nKeep it secure",
+                f"https://api.telegram.org/bot{t}/getMe", f"​{t} "):
+        assert clean_token(raw) == t
+    assert "номер бота 9096675184" in describe_token(t)
+    assert "лишних символов" in describe_token(f"bot{t}")
+    assert "не похоже на токен" in describe_token("абв")
+    assert describe_token("") == "секрет пустой"

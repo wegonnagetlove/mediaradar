@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -42,6 +43,35 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+TOKEN_RE = re.compile(r"(\d{6,}):([A-Za-z0-9_-]{30,})")
+
+
+def clean_token(raw: str) -> str:
+    """Токен бота из чего угодно: с приставкой bot, ссылкой, фразой BotFather, невидимыми символами."""
+    raw = (raw or "").replace("\u200b", "").replace("\ufeff", "").replace("\u00a0", " ")
+    m = TOKEN_RE.search(raw)
+    return f"{m.group(1)}:{m.group(2)}" if m else raw.strip()
+
+
+def describe_token(raw: str) -> str:
+    """Форма секрета без раскрытия самого токена: длина, номер бота, лишние символы."""
+    raw = raw or ""
+    if not raw.strip():
+        return "секрет пустой"
+    parts = []
+    m = TOKEN_RE.search(raw)
+    if m:
+        parts.append(f"номер бота {m.group(1)}, длина части после двоеточия {len(m.group(2))} (обычно 35)")
+        extra = len(raw) - len(m.group(0))
+        if extra:
+            parts.append(f"вокруг токена {extra} лишних символов (их радар уже отбрасывает)")
+    else:
+        parts.append(f"не похоже на токен: длина {len(raw)}, двоеточие {'есть' if ':' in raw else 'нет'}")
+        if any(ord(c) > 127 for c in raw):
+            parts.append("есть русские или особые символы")
+    return "; ".join(parts)
+
+
 @dataclass
 class Secrets:
     llm_api_key: str
@@ -56,8 +86,8 @@ class Secrets:
         g = lambda k: os.environ.get(k, "").strip()  # noqa: E731
         return cls(
             llm_api_key=g("LLM_API_KEY"),
-            telegram_bot_token=g("TELEGRAM_BOT_TOKEN"),
-            telegram_chat_id=g("TELEGRAM_CHAT_ID"),
+            telegram_bot_token=clean_token(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
+            telegram_chat_id=re.sub(r"[^\d-]", "", g("TELEGRAM_CHAT_ID")),
             ig_access_token=g("IG_ACCESS_TOKEN"),
             ig_user_id=g("IG_USER_ID"),
             apify_token=g("APIFY_TOKEN"),
