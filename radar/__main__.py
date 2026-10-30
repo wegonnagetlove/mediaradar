@@ -35,8 +35,15 @@ def cmd_run(args) -> int:
     head = "### Радар: ошибка\n\n" if rep.failed else "### Радар\n\n"
     problems = "\n".join(f"- **{w}**" for w in rep.warnings) + "\n\n" if rep.failed else ""
     _summary(head + problems + "```\n" + rep.summary() + "\n```\n\n" + (rep.digest or "Пусто"))
+    if os.environ.get("GITHUB_ACTIONS") and not rep.failed:
+        for w in rep.warnings:
+            print("::warning title=Радар::" + w.replace("\n", " ").replace("%", "%25"))
+        print("::notice title=Радар::" + rep.summary().replace("\n", " "))
     if rep.failed:
         print("\nОШИБКА: " + "; ".join(rep.warnings), file=sys.stderr)
+        if os.environ.get("GITHUB_ACTIONS"):
+            for w in rep.warnings:  # заметки запуска видны и на странице, и через API
+                print("::error title=Радар::" + w.replace("\n", " ").replace("%", "%25"))
         return 1
     return 0
 
