@@ -21,6 +21,7 @@ def cfg(tmp_path, monkeypatch):
     c["instagram"]["enabled"] = False
     c["social_search"] = False
     c["notify"]["save_digest"] = False
+    c["schedule"] = {}  # расписание проверяется отдельно, остальные тесты от часов не зависят
     monkeypatch.setattr(pipeline, "State", lambda: State(tmp_path / "seen.json"))
     monkeypatch.setattr(pipeline.Telegram, "check", lambda self: "")  # без сети
     return c
@@ -188,7 +189,8 @@ def test_schedule_covers_moscow_day():
     import yaml
     wf = yaml.safe_load(open(config.ROOT / ".github/workflows/radar.yml", encoding="utf-8"))
     crons = [c["cron"] for c in wf[True]["schedule"]]  # PyYAML читает ключ on как True
-    assert "55 3 * * *" in crons and "*/15 5-20 * * *" in crons
+    assert crons == ["7,22,37,52 * * * *"]
+    assert "status" in wf[True]["workflow_dispatch"]["inputs"]
 
 
 def test_openai_uses_responses_api(monkeypatch):
@@ -298,3 +300,43 @@ def test_send_errors_are_reported(cfg, monkeypatch):
     # недоставленная новость не помечена как увиденная: следующий запуск попробует снова
     rep2 = pipeline.run("B", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""))
     assert rep2.candidates == 1
+
+
+
+def test_plan_mode_by_moscow_time(tmp_path):
+    from datetime import datetime, timezone
+    c = config.load()
+    st = State(tmp_path / "s.json")
+    msk = lambda h, m: datetime(2026, 10, 30, h - 3, m, tzinfo=timezone.utc)  # noqa: E731
+    assert pipeline.plan_mode("B", c, st, msk(3, 0))[0] is None            # ночь: тишина
+    assert pipeline.plan_mode("B", c, st, msk(6, 40))[0] is None
+    assert pipeline.plan_mode("B", c, st, msk(7, 5))[0] == "D"             # первый запуск утра
+    assert pipeline.plan_mode("D", c, st, msk(6, 58))[0] == "D"
+    st.meta["digest_date"] = "2026-10-30"
+    assert pipeline.plan_mode("B", c, st, msk(7, 20))[0] == "B"            # выпуск уже был
+    assert pipeline.plan_mode("D", c, st, msk(13, 29))[0] == "B"           # опоздавший выпуск
+    st.meta["digest_date"] = "2026-10-29"
+    assert pipeline.plan_mode("B", c, st, msk(13, 29))[0] == "B"           # после 11:00 выпуска нет
+    assert pipeline.plan_mode("A", c, st, msk(3, 0))[0] == "A"             # ручной A в любое время
+
+
+def test_digest_marks_day_and_window(cfg, monkeypatch):
+    from datetime import datetime, timezone
+    cfg["schedule"] = {"quiet_start": "00:00", "digest_time": "06:55", "digest_latest": "11:00"}
+    fixed = datetime(2026, 10, 30, 4, 10, tzinfo=timezone.utc)  # 07:10 МСК
+    monkeypatch.setattr(pipeline, "now_utc", lambda: fixed)
+    seen_age = {}
+    def fake_collect(cfg_, secrets_, state_, max_age, report_):
+        seen_age["v"] = max_age
+        return []
+    monkeypatch.setattr(pipeline, "collect", fake_collect)
+    monkeypatch.setattr(pipeline, "LLM", FakeDigestLLM)
+    sent = []
+    monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append(t) or True)
+    secrets = config.Secrets("key", "1:abc", "5", "", "", "")
+    rep = pipeline.run("B", cfg=cfg, secrets=secrets)
+    assert rep.mode == "D" and sent[0].startswith("Доброе утро")
+    assert 460 <= seen_age["v"] <= 470                       # с 00:00 (−30 мин) до 07:10
+    sent.clear()
+    rep2 = pipeline.run("B", cfg=cfg, secrets=secrets)
+    assert rep2.mode == "B" and not any(t.startswith("Доброе утро") for t in sent)

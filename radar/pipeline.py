@@ -254,13 +254,53 @@ def order(picks: list[dict]) -> list[dict]:
 
 # ── запуск ───────────────────────────────────────────────────────────────
 
+def _hm(value: str) -> tuple[int, int]:
+    h, m = str(value).split(":")
+    return int(h), int(m)
+
+
+def plan_mode(mode_name: str, cfg, state: State, now: datetime) -> tuple[str | None, str]:
+    """Какой режим выполнять на самом деле (None: пропустить запуск) и пояснение.
+
+    Внешний будильник и расписание GitHub просто дёргают режим B каждые 15 минут, а радар сам решает:
+    ночью тишина, первый запуск после digest_time делает утренний выпуск, потом обычный режим.
+    Опоздавший или повторный утренний выпуск превращается в обычный запуск.
+    """
+    sched = cfg.get("schedule") or {}
+    mode = mode_name.upper()
+    if mode not in ("B", "D") or not sched:
+        return mode, ""
+    local = now.astimezone(cfg.tz)
+    today = local.strftime("%Y-%m-%d")
+    dh, dm = _hm(sched.get("digest_time", "06:55"))
+    qh, qm = _hm(sched.get("quiet_start", "00:00"))
+    lh, lm = _hm(sched.get("digest_latest", "11:00"))
+    minutes = local.hour * 60 + local.minute
+    digest_at, quiet_at, latest = dh * 60 + dm, qh * 60 + qm, lh * 60 + lm
+    in_quiet = (quiet_at <= minutes < digest_at) if quiet_at < digest_at else (minutes >= quiet_at or minutes < digest_at)
+    done_today = state.meta.get("digest_date") == today
+    if in_quiet:
+        return None, f"ночная пауза до {sched.get('digest_time', '06:55')}: новости копятся для утреннего выпуска"
+    if not done_today and minutes < latest:
+        return "D", "" if mode == "D" else "первый запуск утра: утренний выпуск"
+    if mode == "D":
+        return "B", "утренний выпуск уже был или время прошло: обычный запуск"
+    return "B", ""
+
+
 def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cfg=None, secrets=None,
         manual: bool = False) -> Report:
     """Обёртка: проверка связи с Telegram, сам запуск, итоговый отчёт и ошибки отправки."""
     cfg = cfg or config.load()
     secrets = secrets or config.Secrets.from_env()
     now = now_utc()
-    report = Report(mode=mode_name.upper(), started=now)
+    state = State()
+    planned, note = plan_mode(mode_name, cfg, state, now)
+    report = Report(mode=(planned or mode_name).upper(), started=now)
+    if note:
+        report.warnings.append(f"Расписание: {note}")
+    if planned is None:
+        return report
     tg = Telegram(secrets.telegram_bot_token, secrets.telegram_chat_id,
                   silent=bool(cfg["notify"].get("silent_night")) and is_night(now.astimezone(cfg.tz)))
     use_tg = bool(cfg["notify"].get("telegram")) and not dry_run
@@ -272,7 +312,7 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
             report.warnings.append(f"Telegram: {problem}")
             report.failed = True
             tg.token = ""  # дальше не пытаемся слать в заведомо неверный чат
-    _run(mode_name, dry_run=dry_run, no_llm=no_llm, cfg=cfg, secrets=secrets, tg=tg, report=report, now=now)
+    _run(planned, dry_run=dry_run, no_llm=no_llm, cfg=cfg, secrets=secrets, tg=tg, report=report, now=now, state=state)
     for e in tg.errors:
         report.warnings.append(f"Telegram: {e}")
         report.failed = True
@@ -288,11 +328,20 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
     return report
 
 
-def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Telegram, report: Report, now) -> Report:
-    mode = cfg.mode(mode_name)
-    max_age = int(mode["max_age_minutes"])
+def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Telegram, report: Report, now,
+         state: State) -> Report:
+    mode = dict(cfg.mode(mode_name))
     tz = cfg.tz
-    state = State()
+    sched = cfg.get("schedule") or {}
+    if mode.get("digest") and sched:
+        # окно выпуска: от начала ночной паузы (с запасом 30 минут) до текущего момента
+        qh, qm = _hm(sched.get("quiet_start", "00:00"))
+        local = now.astimezone(tz)
+        start = local.replace(hour=qh, minute=qm, second=0, microsecond=0)
+        if start > local:
+            start -= timedelta(days=1)
+        mode["max_age_minutes"] = int((local - start).total_seconds() / 60) + 30
+    max_age = int(mode["max_age_minutes"])
     notify_cfg = cfg["notify"]
 
     if cfg.get("engine") == "agent" and not no_llm:
@@ -485,6 +534,8 @@ def _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state) -> Repor
             report.sent = len(picks)
         for p in picks:
             state.mark_sent(p["headline"], p["_item"].url)
+        if not tg.errors:
+            state.meta["digest_date"] = now.astimezone(tz).strftime("%Y-%m-%d")
         state.mark_seen(i.id for i in cands)
         state.save()
         _save_digest(cfg, report, now)

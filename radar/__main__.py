@@ -28,7 +28,8 @@ def _summary(text: str) -> None:
 
 
 def cmd_run(args) -> int:
-    manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    manual = (os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+              and os.environ.get("RADAR_STATUS", "yes") != "no")
     rep = pipeline.run(args.mode, dry_run=args.dry_run, no_llm=args.no_llm, manual=manual)
     print(rep.summary())
     print("\n" + (rep.digest or "Пусто"))

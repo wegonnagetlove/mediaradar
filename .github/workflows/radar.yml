@@ -2,15 +2,15 @@ name: Радар новостей
 
 on:
   schedule:
-    # Время в UTC, Москва = UTC+3. GitHub запускает с задержкой обычно до 5–15 минут;
-    # память радара (state/seen.json) не даёт ни пропусков, ни дублей.
-    - cron: "55 3 * * *"             # 06:55 МСК: утренний выпуск за ночь (режим D)
-    - cron: "15,30,45 4 * * *"       # 07:15, 07:30, 07:45 МСК: режим B
-    - cron: "*/15 5-20 * * *"        # 08:00–23:45 МСК каждые 15 минут: режим B
+    # Запасной будильник GitHub: он бывает сильно неточен и пропускает запуски, поэтому основной
+    # будильник внешний (cron-job.org, см. README). Время и режим решает сам радар по config.yaml:
+    # ночью тишина, первый запуск после 06:55 МСК делает утренний выпуск.
+    # Минуты не круглые: в :00 и :15 у GitHub очередь и пропуски чаще.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "Режим: A разовый (3–5 новостей за час), B как днём по расписанию, D утренний выпуск"
+        description: "Режим: B обычный (по расписанию сам выберет утренний выпуск или тишину), A разовый за час, D утренний выпуск"
         type: choice
         options: [A, B, D]
         default: A
@@ -19,6 +19,11 @@ on:
         type: choice
         options: [run, dry-run, check]
         default: run
+      status:
+        description: "Прислать в бот отчёт о запуске (для внешнего будильника: no)"
+        type: choice
+        options: ["yes", "no"]
+        default: "yes"
 
 concurrency:
   group: radar
@@ -60,7 +65,7 @@ jobs:
         run: |
           ACTION="${{ inputs.action || 'run' }}"
           MODE="${{ inputs.mode || 'B' }}"
-          if [ "${{ github.event.schedule }}" = "55 3 * * *" ]; then MODE=D; fi
+          export RADAR_STATUS="${{ inputs.status || 'no' }}"
           case "$ACTION" in
             check)   python -m radar -v check ;;
             dry-run) python -m radar -v run --mode "$MODE" --dry-run ;;

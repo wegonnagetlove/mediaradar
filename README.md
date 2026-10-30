@@ -12,7 +12,20 @@
 | 07:15–23:45, каждые 15 минут | Новости по мере поступления: каждая отдельным сообщением, короткий пост в стиле канала под фотографией (несколько фото приходят альбомом), внизу ссылка «Источник». Фото берётся из поста Instagram, телеграм‑канала, RSS или со страницы статьи; если снимка нет, под текстом раскрывается превью источника. |
 | 00:00–06:55 | Тишина. Всё, что выйдет ночью, попадёт в утренний выпуск. |
 
-Выпуск стартует в 06:55, потому что GitHub ставит запуски в очередь и обычно опаздывает на несколько минут: так список приходит около 07:00. Время меняется в `.github/workflows/radar.yml` (в UTC, Москва = UTC+3). Утренний выпуск можно вызвать вручную: Run workflow → mode `D`.
+Радар запускается каждые 15 минут круглосуточно и сам решает по московскому времени, что делать: ночью молчит, первый запуск после 06:55 делает утренний выпуск, дальше присылает посты. Время меняется в `config.yaml → schedule`.
+
+### Внешний будильник (обязательно)
+
+Расписание GitHub работает «по возможности»: запуски опаздывают на часы или пропускаются. Поэтому радар будит бесплатный сервис [cron-job.org](https://cron-job.org), а расписание GitHub остаётся запасным.
+
+1. **Ключ GitHub для будильника.** [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new): название `cron`, срок до года, Repository access → Only select repositories → `mediaradar`, Permissions → Repository → **Actions: Read and write**. Generate token, скопировать.
+2. **Задание на cron-job.org.** Зарегистрироваться, Create cronjob:
+   - URL: `https://api.github.com/repos/wegonnagetlove/mediaradar/actions/workflows/radar.yml/dispatches`
+   - Execution schedule: Every 15 minutes
+   - Advanced → Request method: **POST**
+   - Headers: `Authorization` = `Bearer <ключ из шага 1>`, `Accept` = `application/vnd.github+json`
+   - Request body: `{"ref":"main","inputs":{"mode":"B","action":"run","status":"no"}}`
+3. Save. Успешный вызов возвращает код **204**; история видна в разделе History задания.
 
 ## Как это работает
 
