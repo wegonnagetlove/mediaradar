@@ -35,6 +35,7 @@ class Report:
     sent: int = 0
     digest: str = ""
     failed: bool = False
+    picked: list[str] = field(default_factory=list)
 
     def summary(self) -> str:
         src = ", ".join(f"{k}: {v}" for k, v in self.collected.items())
@@ -302,12 +303,18 @@ def plan_mode(mode_name: str, cfg, state: State, now: datetime) -> tuple[str | N
 
 
 def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cfg=None, secrets=None,
-        manual: bool = False) -> Report:
+        manual: bool = False, ignore_seen: bool = False) -> Report:
     """Обёртка: проверка связи с Telegram, сам запуск, итоговый отчёт и ошибки отправки."""
     cfg = cfg or config.load()
     secrets = secrets or config.Secrets.from_env()
     now = now_utc()
-    state = State()
+    if ignore_seen:  # диагностика: пустая память, ничего не сохраняется
+        import tempfile
+        from pathlib import Path
+        state = State(Path(tempfile.mkdtemp()) / "seen.json")
+        dry_run = True
+    else:
+        state = State()
     planned, note = plan_mode(mode_name, cfg, state, now)
     report = Report(mode=(planned or mode_name).upper(), started=now)
     if note:
@@ -402,6 +409,7 @@ def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Teleg
             by_id = {c.id: c for c in cands}
             picks = order(enrich(picks, by_id, bool(cfg.get("strict_time")), max_age, now))
             report.picks = len(picks)
+            report.picked = [f"{p['_item'].label}: {p['_item'].title[:90]}" for p in picks]
             posts = write_posts(llm, cfg, picks, now) if picks else {}
         except (LLMError, ValueError) as e:
             _fail(state, tg, report, f"нейросеть: {e}", dry_run)

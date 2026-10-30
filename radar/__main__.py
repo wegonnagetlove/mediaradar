@@ -30,7 +30,8 @@ def _summary(text: str) -> None:
 def cmd_run(args) -> int:
     manual = (os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
               and os.environ.get("RADAR_STATUS", "yes") != "no")
-    rep = pipeline.run(args.mode, dry_run=args.dry_run, no_llm=args.no_llm, manual=manual)
+    rep = pipeline.run(args.mode, dry_run=args.dry_run, no_llm=args.no_llm, manual=manual,
+                       ignore_seen=args.ignore_seen)
     print(rep.summary())
     print("\n" + (rep.digest or "Пусто"))
     head = "### Радар: ошибка\n\n" if rep.failed else "### Радар\n\n"
@@ -40,6 +41,8 @@ def cmd_run(args) -> int:
         for w in rep.warnings:
             print("::warning title=Радар::" + w.replace("\n", " ").replace("%", "%25"))
         print("::notice title=Радар::" + rep.summary().replace("\n", " "))
+        for t in rep.picked:
+            print("::notice title=Отобрано::" + t.replace("\n", " "))
     if rep.failed:
         print("\nОШИБКА: " + "; ".join(rep.warnings), file=sys.stderr)
         if os.environ.get("GITHUB_ACTIONS"):
@@ -123,6 +126,7 @@ def main(argv=None) -> int:
     r.add_argument("--mode", default=os.environ.get("RADAR_MODE", "B"), choices=["A", "B", "D", "a", "b", "d"])
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--no-llm", action="store_true")
+    r.add_argument("--ignore-seen", action="store_true", help="диагностика: без памяти и без отправки")
     sub.add_parser("check")
     sub.add_parser("reset")
     p.add_argument("-v", "--verbose", action="store_true")

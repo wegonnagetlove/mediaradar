@@ -11,9 +11,9 @@ on:
         options: [A, B, D]
         default: A
       action:
-        description: "run — запуск; dry-run — без отправки; check — проверить источники"
+        description: "run — запуск; dry-run — без отправки; check — проверить источники; diagnose — последний час без памяти и без отправки"
         type: choice
-        options: [run, dry-run, check]
+        options: [run, dry-run, check, diagnose]
         default: run
       status:
         description: "Прислать в бот отчёт о запуске (для внешнего будильника: no)"
@@ -65,6 +65,7 @@ jobs:
           case "$ACTION" in
             check)   python -m radar -v check ;;
             dry-run) python -m radar -v run --mode "$MODE" --dry-run ;;
+            diagnose) python -m radar -v run --mode A --ignore-seen ;;
             *)       python -m radar -v run --mode "$MODE" ;;
           esac
 
