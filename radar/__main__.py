@@ -76,13 +76,14 @@ def cmd_check(args) -> int:
         for it in ig:
             by_acc[(it.author or "").lower()] = by_acc.get((it.author or "").lower(), 0) + 1
         all_ig = instagram.normalize_accounts(ig_cfg.get("accounts"))
-        limit = int(ig_cfg.get("max_per_run", 45))
+        limit = instagram.per_run_limit(ig_cfg)
         batch = rotation.pick([a for a in all_ig if not a.get("feed")], State(), "ig", limit)
         for a in batch + [a for a in all_ig if a.get("feed")]:
             rows.append(("instagram", "@" + a["name"], by_acc.get(a["name"].lower(), 0)))
         tier1 = sum(1 for a in all_ig if int(a.get("tier", 2)) == 1)
         notes.append(f"Instagram: в базе {len(all_ig)} аккаунтов, tier 1: {tier1}, за запуск до {limit}; "
-                     f"полный круг очереди примерно за {rotation.cycle_hours(len(all_ig), tier1, limit)} ч. "
+                     f"полный круг очереди примерно за "
+                     f"{rotation.cycle_hours(len(all_ig), tier1, limit, int(ig_cfg.get('run_interval_minutes', 15)))} ч. "
                      "В таблице первая порция очереди.")
         dead = rotation.disabled_list(st, "ig")
         if dead:

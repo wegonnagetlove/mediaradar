@@ -158,6 +158,15 @@ def fetch_feed(account: dict) -> list[Item]:
 
 # ── точка входа ──────────────────────────────────────────────────────────
 
+def per_run_limit(cfg_ig: dict) -> int:
+    """Сколько аккаунтов за запуск, чтобы уложиться в лимит запросов в час (Business Discovery: 200)."""
+    v = cfg_ig.get("max_per_run", "auto")
+    if str(v).lower() != "auto":
+        return int(v)
+    runs_per_hour = max(1, 60 // max(1, int(cfg_ig.get("run_interval_minutes", 15))))
+    return max(5, int(cfg_ig.get("hourly_limit", 180)) // runs_per_hour)
+
+
 def due(cfg_ig: dict, state) -> bool:
     """Платные провайдеры опрашиваются не чаще min_interval_minutes."""
     minutes = int(cfg_ig.get("min_interval_minutes") or 0)
@@ -185,7 +194,7 @@ def collect(cfg_ig: dict, secrets, pool, state=None) -> tuple[list[Item], list[s
     feed_accounts = [a for a in accounts if a.get("feed")]
     api_accounts = [a for a in accounts if not a.get("feed")]
     if state is not None:
-        api_accounts = rotation.pick(api_accounts, state, "ig", int(cfg_ig.get("max_per_run", 45)), now)
+        api_accounts = rotation.pick(api_accounts, state, "ig", per_run_limit(cfg_ig), now)
     default_window = int(cfg_ig.get("default_window_minutes", 60))
     cap = int(cfg_ig.get("max_window_minutes", 360))
 

@@ -30,8 +30,14 @@ def pick(accounts: list[dict], state, key: str, limit: int, now: datetime | None
     live = [a for a in accounts if not disabled(state, key, a["name"], now)]
     if limit <= 0 or len(live) <= limit:
         return live
-    top = [a for a in live if int(a.get("tier", 2)) == 1][:limit]
+    top = [a for a in live if int(a.get("tier", 2)) == 1]
     rest = [a for a in live if int(a.get("tier", 2)) != 1]
+    top_room = limit if not rest else max(1, limit // 2)
+    if len(top) > top_room:
+        # при частых запусках tier 1 тоже по кругу, но чаще остальных (под них половина запросов)
+        c = int(state.meta.get(f"{key}_top_cursor", 0)) % len(top)
+        state.meta[f"{key}_top_cursor"] = (c + top_room) % len(top)
+        top = [top[(c + i) % len(top)] for i in range(top_room)]
     room = limit - len(top)
     if room <= 0 or not rest:
         return top
@@ -82,7 +88,7 @@ def disabled_list(state, key: str, now: datetime | None = None) -> list[tuple[st
 
 def cycle_hours(total: int, tier1: int, limit: int, run_minutes: int = 15) -> float:
     rest = max(0, total - tier1)
-    room = max(1, limit - tier1)
+    room = max(1, limit - min(tier1, max(1, limit // 2)))
     if total <= limit:
         return run_minutes / 60
     return round(-(-rest // room) * run_minutes / 60, 1)

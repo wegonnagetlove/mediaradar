@@ -15,6 +15,7 @@ timezone: Europe/Moscow
 # Утренний выпуск приходит один раз в день; если до digest_latest его так и не удалось сделать,
 # день начинается сразу с обычных постов.
 schedule:
+  run_interval_minutes: 5     # как часто будильник запускает радар (FastCron); от этого считаются лимиты
   quiet_start: "00:00"
   digest_time: "06:55"
   digest_latest: "11:00"
@@ -36,6 +37,11 @@ engine: hybrid
 # Дополнительный проход нейросети с веб-поиском по Instagram / Threads / X
 # (только anthropic и openai). Дороже, но ловит соцсети.
 social_search: true
+
+# При частых запусках тяжёлые источники опрашиваются реже, чтобы Google не начал блокировать,
+# а поиск нейросетью по Threads и X не разорял баланс. Телеграм-каналы, RSS и Instagram: каждый запуск.
+google_news_interval_minutes: 15
+social_search_interval_minutes: 30
 
 # Если время публикации не удалось подтвердить по самой странице
 # (meta article:published_time / JSON-LD), новость отбрасывается.
@@ -160,7 +166,8 @@ instagram:
   # Аккаунты с tier: 1 проверяются каждый запуск, остальные по кругу порциями.
   # У аккаунта из очереди берутся посты с его прошлой проверки (но не старше max_window_minutes).
   # Аккаунт, который 3 запуска подряд отвечает ошибкой, отключается на неделю (видно в check).
-  max_per_run: 45
+  max_per_run: auto          # auto: hourly_limit / число запусков в час (при 5 минутах 15 аккаунтов)
+  hourly_limit: 180          # запас от лимита Meta 200 в час
   default_window_minutes: 60
   max_window_minutes: 360
   min_interval_minutes: 0     # для apify поставьте 30–60, чтобы не платить за каждый запуск

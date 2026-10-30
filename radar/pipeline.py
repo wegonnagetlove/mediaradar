@@ -46,6 +46,17 @@ class Report:
 
 # ── сбор ─────────────────────────────────────────────────────────────────
 
+def every(state: State, key: str, minutes: int, now: datetime | None = None) -> bool:
+    """Тяжёлые источники при частых запусках опрашиваются не чаще раза в minutes минут."""
+    if not minutes:
+        return True
+    now = now or now_utc()
+    last = parse_dt(state.meta.get(f"last_{key}"))
+    if last and now - last < timedelta(minutes=minutes) - timedelta(minutes=1):
+        return False
+    state.meta[f"last_{key}"] = now.isoformat()
+    return True
+
 def collect(cfg: config.Config, secrets: config.Secrets, state: State, max_age: int, report: Report) -> list[Item]:
     src = cfg["sources"]
     items: list[Item] = []
@@ -56,9 +67,11 @@ def collect(cfg: config.Config, secrets: config.Secrets, state: State, max_age: 
             jobs[pool.submit(telegram.fetch, ch["name"], label=ch.get("label"), region=ch.get("region", "ru"))] = "telegram"
         for feed in src.get("rss") or []:
             jobs[pool.submit(rss.fetch, feed["url"], label=feed["label"], region=feed.get("region", "intl"))] = "rss"
-        for region, queries in (src.get("google_news") or {}).items():
+        gnews_due = every(state, "google_news", int(cfg.get("google_news_interval_minutes") or 0))
+        gnews_window = max(max_age, int(cfg.get("google_news_interval_minutes") or 0) + 30)
+        for region, queries in ((src.get("google_news") or {}).items() if gnews_due else []):
             for q in queries or []:
-                jobs[pool.submit(google_news.fetch, q, region, max_age)] = "google_news"
+                jobs[pool.submit(google_news.fetch, q, region, gnews_window)] = "google_news"
 
         ig_cfg = cfg.get("instagram") or {}
         ig_due = ig_cfg.get("enabled") and instagram.due(ig_cfg, state)
@@ -354,7 +367,8 @@ def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Teleg
             llm = LLM(cfg["llm"], secrets.llm_api_key)
         except LLMError as e:
             report.warnings.append(str(e))
-    if llm and cfg.get("social_search") and llm.can_search:
+    if llm and cfg.get("social_search") and llm.can_search and \
+            every(state, "social_search", int(cfg.get("social_search_interval_minutes") or 0)):
         try:
             social = social_scan(llm, cfg, max_age, now, state)
             report.collected["social_search"] = len(social)

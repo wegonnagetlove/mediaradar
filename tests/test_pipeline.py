@@ -346,3 +346,29 @@ def test_digest_marks_day_and_window(cfg, monkeypatch):
     sent.clear()
     rep2 = pipeline.run("B", cfg=cfg, secrets=secrets)
     assert rep2.mode == "B" and not any(t.startswith("Доброе утро") for t in sent)
+
+
+def test_five_minute_cadence_limits(tmp_path):
+    from radar import rotation
+    from radar.sources import instagram
+    c = config.load()
+    assert instagram.per_run_limit(c["instagram"]) == 15          # 180 запросов в час / 12 запусков
+    st = State(tmp_path / "s.json")
+    accs = [{"name": f"t{i}", "tier": 1} for i in range(20)] + [{"name": f"r{i}"} for i in range(40)]
+    seen_top, seen_rest = set(), set()
+    for _ in range(5):
+        got = rotation.pick(accs, st, "ig", 15)
+        assert len(got) == 15
+        seen_top |= {a["name"] for a in got if a["name"].startswith("t")}
+        seen_rest |= {a["name"] for a in got if a["name"].startswith("r")}
+    assert len(seen_top) == 20 and len(seen_rest) == 40          # никто не голодает
+
+
+def test_every_throttles(tmp_path):
+    from datetime import timedelta
+    st = State(tmp_path / "s.json")
+    t0 = now_utc()
+    assert pipeline.every(st, "google_news", 15, t0)
+    assert not pipeline.every(st, "google_news", 15, t0 + timedelta(minutes=5))
+    assert pipeline.every(st, "google_news", 15, t0 + timedelta(minutes=15))
+    assert pipeline.every(st, "x", 0, t0)

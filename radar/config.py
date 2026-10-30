@@ -133,6 +133,9 @@ def load(path: str | Path | None = None) -> Config:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     cfg = _merge(DEFAULTS, data)
+    interval = (cfg.get("schedule") or {}).get("run_interval_minutes")
+    if interval:
+        cfg.setdefault("instagram", {}).setdefault("run_interval_minutes", interval)
     acc_path = path.parent / str(cfg.get("accounts_file") or "accounts.yaml")
     if acc_path.exists():
         with open(acc_path, encoding="utf-8") as f:
