@@ -120,3 +120,31 @@ def test_images_from_sources():
 def test_article_og_image():
     html = read("article.html").replace("<head>", '<head><meta property="og:image" content="https://wwd.com/og.jpg">')
     assert article.parse(html, "https://wwd.com/a/1").image == "https://wwd.com/og.jpg"
+
+
+def test_instagram_collect_rotation_and_failures(monkeypatch, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from radar.config import Secrets
+    from radar.state import State
+    st = State(tmp_path / "s.json")
+    calls = []
+
+    def fake(account, token, uid, **k):
+        calls.append(account["name"])
+        if account["name"] == "dead":
+            return [], "Invalid user", False
+        if account["name"] == "limited":
+            return [], "Application request limit reached", True
+        return instagram.parse_graph(json.loads(read("ig_graph.json")), account["name"], "intl"), "", False
+
+    monkeypatch.setattr(instagram, "fetch_graph_ex", fake)
+    cfg = {"enabled": True, "provider": "graph", "max_per_run": 3,
+           "accounts": ["dead", "limited", {"name": "ok", "tier": 1}, "b", "c"]}
+    s = Secrets("", "", "", "tok", "uid", "")
+    with ThreadPoolExecutor(4) as pool:
+        for _ in range(6):
+            items, warn = instagram.collect(cfg, s, pool, st)
+    assert any("@dead отключён" in w for w in warn) or "dead" in st.meta["ig_fail"]
+    assert st.meta["ig_fail"]["dead"]["n"] >= 3 and "limited" not in st.meta["ig_fail"]
+    assert all(it.extra.get("window_minutes") for it in items)
+    assert calls.count("ok") == 6   # tier 1 в каждом запуске

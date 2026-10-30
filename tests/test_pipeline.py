@@ -212,3 +212,43 @@ def test_openai_uses_responses_api(monkeypatch):
 def test_config_uses_openai():
     c = config.load()
     assert c["llm"]["provider"] == "openai" and c["llm"]["model"] == "gpt-6-astra"
+
+
+def test_accounts_base_loaded_and_unique():
+    c = config.load()
+    ig = c["instagram"]["accounts"]
+    names = [a["name"].lower() for a in ig]
+    assert len(ig) >= 400 and len(names) == len(set(names))
+    assert all(isinstance(a["name"], str) and a["region"] in ("ru", "intl") for a in ig)
+    total = len(ig) + len(c["social_accounts"]["threads"]) + len(c["social_accounts"]["x"])
+    assert total >= 500
+
+
+def test_rotation_queue(tmp_path):
+    from radar import rotation
+    st = State(tmp_path / "s.json")
+    accs = [{"name": f"top{i}", "tier": 1} for i in range(5)] + [{"name": f"a{i}"} for i in range(20)]
+    seen = set()
+    for _ in range(4):  # 5 tier1 + 5 из очереди за запуск: 20 рядовых за 4 запуска
+        got = rotation.pick(accs, st, "ig", 10)
+        assert len(got) == 10 and {a["name"] for a in got[:5]} == {f"top{i}" for i in range(5)}
+        seen |= {a["name"] for a in got[5:]}
+    assert seen == {f"a{i}" for i in range(20)}
+    # три ошибки подряд: аккаунт отключён и в очередь не попадает
+    for _ in range(3):
+        disabled_now = rotation.fail(st, "ig", "a0", "Invalid user")
+    assert disabled_now and rotation.disabled(st, "ig", "a0")
+    assert all(a["name"] != "a0" for _ in range(4) for a in rotation.pick(accs, st, "ig", 10))
+    assert rotation.disabled_list(st, "ig")[0][0] == "a0"
+
+
+def test_rotated_account_window(cfg, tmp_path):
+    from radar import rotation
+    st = State(tmp_path / "s.json")
+    old = mk("Пост трёхчасовой давности", 180, source="instagram")
+    old.extra["window_minutes"] = 240
+    out = pipeline.select_candidates([old, mk("Обычный старый", 180)], cfg, st, 60, now_utc())
+    assert [i.title for i in out] == ["Пост трёхчасовой давности"]
+    rotation.polled(st, "ig", "x", now_utc() - timedelta(hours=3))
+    assert 190 <= rotation.window_minutes(st, "ig", "x", 60, 360) <= 200
+    assert rotation.window_minutes(st, "ig", "new", 60, 360) == 60

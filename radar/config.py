@@ -73,11 +73,41 @@ class Config(dict):
         return self["modes"][name.upper()]
 
 
+def _name(a) -> str:
+    return str(a if isinstance(a, str) else (a or {}).get("name", "")).lstrip("@").lower()
+
+
+def _append_unique(base: list, extra: list) -> list:
+    seen = {_name(a) for a in base}
+    out = list(base)
+    for a in extra or []:
+        n = _name(a)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(a)
+    return out
+
+
+def merge_accounts(cfg: dict, accounts: dict) -> dict:
+    """База аккаунтов из accounts.yaml дописывается к спискам из config.yaml без повторов."""
+    ig = cfg.setdefault("instagram", {})
+    ig["accounts"] = _append_unique(ig.get("accounts") or [], accounts.get("instagram"))
+    social = cfg.setdefault("social_accounts", {})
+    for net in ("threads", "x"):
+        social[net] = _append_unique(social.get(net) or [], accounts.get(net))
+    return cfg
+
+
 def load(path: str | Path | None = None) -> Config:
     path = Path(path or os.environ.get("RADAR_CONFIG") or ROOT / "config.yaml")
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-    return Config(_merge(DEFAULTS, data))
+    cfg = _merge(DEFAULTS, data)
+    acc_path = path.parent / str(cfg.get("accounts_file") or "accounts.yaml")
+    if acc_path.exists():
+        with open(acc_path, encoding="utf-8") as f:
+            merge_accounts(cfg, yaml.safe_load(f) or {})
+    return Config(cfg)
 
 
 def prompt(name: str) -> str:

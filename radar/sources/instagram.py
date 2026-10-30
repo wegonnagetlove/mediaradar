@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from .. import net
+from .. import net, rotation
 from ..models import Item
 from ..timeutil import now_utc, parse_dt
 from . import rss
@@ -80,7 +80,17 @@ def parse_graph(payload: dict, username: str, region: str) -> list[Item]:
     return items
 
 
+RATE_LIMIT_CODES = {4, 17, 32, 613, 80002}
+
+
 def fetch_graph(account: dict, token: str, ig_user_id: str, *, per_account: int = 8, version: str = "") -> list[Item]:
+    items, _err, _rl = fetch_graph_ex(account, token, ig_user_id, per_account=per_account, version=version)
+    return items
+
+
+def fetch_graph_ex(account: dict, token: str, ig_user_id: str, *, per_account: int = 8,
+                   version: str = "") -> tuple[list[Item], str, bool]:
+    """(посты, текст ошибки или "", это ли превышение лимита / сбой сети)."""
     u = account["name"]
     fields = (f"business_discovery.username({u})"
               f"{{username,media.limit({per_account}){{caption,timestamp,permalink,media_type,media_product_type,"
@@ -89,13 +99,18 @@ def fetch_graph(account: dict, token: str, ig_user_id: str, *, per_account: int 
         r = net.get(graph_url(ig_user_id, version), params={"fields": fields, "access_token": token})
     except Exception as e:  # noqa: BLE001
         log.warning("Instagram @%s: %s", u, e)
-        return []
-    data = r.json() if r.headers.get("content-type", "").startswith(("application/json", "text/javascript")) else {}
+        return [], str(e), True
+    try:
+        data = r.json()
+    except ValueError:
+        data = {}
     if r.status_code != 200 or "error" in data:
-        err = (data.get("error") or {}).get("message", f"HTTP {r.status_code}")
+        e = data.get("error") or {}
+        err = e.get("message", f"HTTP {r.status_code}")
+        transient = e.get("code") in RATE_LIMIT_CODES or r.status_code >= 500 or e.get("is_transient", False)
         log.warning("Instagram @%s: %s", u, err)
-        return []
-    return parse_graph(data, u, account.get("region", "intl"))
+        return [], err, bool(transient)
+    return parse_graph(data, u, account.get("region", "intl")), "", False
 
 
 # ── apify ────────────────────────────────────────────────────────────────
@@ -152,8 +167,12 @@ def due(cfg_ig: dict, state) -> bool:
     return last is None or now_utc() - last >= timedelta(minutes=minutes) - timedelta(minutes=2)
 
 
-def collect(cfg_ig: dict, secrets, pool) -> tuple[list[Item], list[str]]:
-    """Возвращает (новости, предупреждения для отчёта)."""
+def collect(cfg_ig: dict, secrets, pool, state=None) -> tuple[list[Item], list[str]]:
+    """Возвращает (новости, предупреждения для отчёта).
+
+    С памятью радара (state) работает очередь: tier 1 каждый запуск, остальные по кругу,
+    не больше max_per_run запросов; у каждого поста помечено окно с прошлой проверки аккаунта.
+    """
     if not cfg_ig.get("enabled"):
         return [], []
     accounts = normalize_accounts(cfg_ig.get("accounts"))
@@ -161,29 +180,68 @@ def collect(cfg_ig: dict, secrets, pool) -> tuple[list[Item], list[str]]:
     per = int(cfg_ig.get("per_account", 8))
     warnings: list[str] = []
     items: list[Item] = []
+    now = now_utc()
 
     feed_accounts = [a for a in accounts if a.get("feed")]
     api_accounts = [a for a in accounts if not a.get("feed")]
-    futures = [pool.submit(fetch_feed, a) for a in feed_accounts]
+    if state is not None:
+        api_accounts = rotation.pick(api_accounts, state, "ig", int(cfg_ig.get("max_per_run", 45)), now)
+    default_window = int(cfg_ig.get("default_window_minutes", 60))
+    cap = int(cfg_ig.get("max_window_minutes", 360))
 
+    def tag(account: dict, got: list[Item]) -> list[Item]:
+        if state is not None:
+            w = rotation.window_minutes(state, "ig", account["name"], default_window, cap, now)
+            for it in got:
+                it.extra["window_minutes"] = w
+                if account.get("tier"):
+                    it.extra["tier"] = account["tier"]
+        return got
+
+    feed_futs = [(a, pool.submit(fetch_feed, a)) for a in feed_accounts]
+    graph_futs = []
     if api_accounts:
         if provider == "graph":
             if secrets.ig_access_token and secrets.ig_user_id:
-                futures += [pool.submit(fetch_graph, a, secrets.ig_access_token, secrets.ig_user_id,
-                                        per_account=per, version=cfg_ig.get("graph_api_version", ""))
-                            for a in api_accounts]
+                graph_futs = [(a, pool.submit(fetch_graph_ex, a, secrets.ig_access_token, secrets.ig_user_id,
+                                              per_account=per, version=cfg_ig.get("graph_api_version", "")))
+                              for a in api_accounts]
             else:
                 warnings.append("Instagram: нет IG_ACCESS_TOKEN / IG_USER_ID, аккаунты без feed пропущены")
         elif provider == "apify":
             if secrets.apify_token:
-                futures.append(pool.submit(fetch_apify, api_accounts, secrets.apify_token,
-                                           actor=cfg_ig.get("apify_actor", "apify~instagram-post-scraper"),
-                                           per_account=per, extra_input=cfg_ig.get("apify_input")))
+                got = pool.submit(fetch_apify, api_accounts, secrets.apify_token,
+                                  actor=cfg_ig.get("apify_actor", "apify~instagram-post-scraper"),
+                                  per_account=per, extra_input=cfg_ig.get("apify_input")).result()
+                by_user: dict[str, list[Item]] = {}
+                for it in got:
+                    by_user.setdefault((it.author or "").lower(), []).append(it)
+                for a in api_accounts:
+                    items += tag(a, by_user.get(a["name"].lower(), []))
+                    if state is not None:
+                        rotation.polled(state, "ig", a["name"], now)
             else:
                 warnings.append("Instagram: нет APIFY_TOKEN, аккаунты без feed пропущены")
         else:
             warnings.append(f"Instagram: неизвестный provider «{provider}»")
 
-    for f in futures:
-        items.extend(f.result())
+    for a, f in feed_futs:
+        items += tag(a, f.result())
+    rate_limited = 0
+    for a, f in graph_futs:
+        got, err, transient = f.result()
+        if err and transient:
+            rate_limited += 1
+            continue  # аккаунт не проверен: окно не сдвигаем, в следующий раз возьмём шире
+        items += tag(a, got)
+        if state is not None:
+            rotation.polled(state, "ig", a["name"], now)
+            if err:
+                if rotation.fail(state, "ig", a["name"], err, now):
+                    warnings.append(f"Instagram: @{a['name']} отключён на неделю: {err[:120]}")
+            else:
+                rotation.ok(state, "ig", a["name"])
+    if rate_limited:
+        warnings.append(f"Instagram: {rate_limited} аккаунтов не проверено из-за лимита или сбоя сети; "
+                        "уменьшите instagram.max_per_run, если повторяется")
     return items, warnings

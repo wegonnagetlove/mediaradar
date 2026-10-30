@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from . import article, config
+from . import article, config, rotation
 from .llm import LLM, LLMError, extract_json
 from .models import CompetitorPost, Item
 from .notify import Telegram, is_night
@@ -61,7 +61,7 @@ def collect(cfg: config.Config, secrets: config.Secrets, state: State, max_age: 
         ig_cfg = cfg.get("instagram") or {}
         ig_due = ig_cfg.get("enabled") and instagram.due(ig_cfg, state)
         if ig_due:
-            ig_items, ig_warn = instagram.collect(ig_cfg, secrets, pool)
+            ig_items, ig_warn = instagram.collect(ig_cfg, secrets, pool, state)
             items += ig_items
             report.collected["instagram"] = len(ig_items)
             report.warnings += ig_warn
@@ -104,7 +104,9 @@ def select_candidates(items: list[Item], cfg: config.Config, state: State, max_a
     seen_titles: set[str] = set()
     fresh: list[Item] = []
     for it in sorted(items, key=lambda i: i.published):  # самая ранняя копия сюжета побеждает
-        if it.published < border or it.published > now + timedelta(minutes=10):
+        own = it.extra.get("window_minutes")  # аккаунт из очереди: окно с его прошлой проверки
+        item_border = now - timedelta(minutes=max(max_age, int(own))) if own else border
+        if it.published < item_border or it.published > now + timedelta(minutes=10):
             continue
         if not state.is_new(it.id):
             continue
@@ -121,13 +123,30 @@ def select_candidates(items: list[Item], cfg: config.Config, state: State, max_a
     return fresh
 
 
-def social_scan(llm: LLM, cfg: config.Config, max_age: int, now: datetime) -> list[Item]:
-    accounts = cfg.get("social_accounts") or {}
+def _social_names(raw) -> list[dict]:
+    out = []
+    for a in raw or []:
+        if isinstance(a, str):
+            out.append({"name": a.lstrip("@")})
+        elif isinstance(a, dict) and a.get("name"):
+            out.append({**a, "name": str(a["name"]).lstrip("@")})
+    return out
+
+
+def social_scan(llm: LLM, cfg: config.Config, max_age: int, now: datetime, state: State | None = None) -> list[Item]:
+    raw = cfg.get("social_accounts") or {}
+    per_run = int(raw.get("per_run", 12)) if isinstance(raw, dict) else 12
+    accounts = {}
+    for net_name in ("instagram", "threads", "x"):
+        lst = _social_names(raw.get(net_name))
+        if state is not None:
+            lst = rotation.pick(lst, state, f"social_{net_name}", per_run, now)
+        accounts[net_name] = [a["name"] for a in lst]
     prompt = config.prompt("social.md").format(
         now=now.astimezone(cfg.tz).strftime("%d.%m.%Y %H:%M"), now_utc=now.strftime("%Y-%m-%d %H:%M"),
         max_age=max_age,
         instagram=", ".join("@" + a for a in accounts.get("instagram") or []) or "нет",
-        threads=", ".join("@" + a for a in accounts.get("threads") or accounts.get("instagram") or []) or "нет",
+        threads=", ".join("@" + a for a in accounts.get("threads") or []) or "нет",
         x=", ".join("@" + a for a in accounts.get("x") or []) or "нет",
     )
     data = extract_json(llm.complete("Ты новостной мониторинг соцсетей. Отвечаешь только JSON.", prompt,
@@ -260,7 +279,7 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
             report.warnings.append(str(e))
     if llm and cfg.get("social_search") and llm.can_search:
         try:
-            social = social_scan(llm, cfg, max_age, now)
+            social = social_scan(llm, cfg, max_age, now, state)
             report.collected["social_search"] = len(social)
             items += social
         except (LLMError, ValueError) as e:

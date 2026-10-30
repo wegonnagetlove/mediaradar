@@ -149,33 +149,32 @@ instagram:
   enabled: true
   provider: graph
   per_account: 8              # сколько последних постов смотреть у каждого аккаунта
+  # Очередь. Лимит Business Discovery: 200 запросов в час, то есть ~45 за запуск раз в 15 минут.
+  # Аккаунты с tier: 1 проверяются каждый запуск, остальные по кругу порциями.
+  # У аккаунта из очереди берутся посты с его прошлой проверки (но не старше max_window_minutes).
+  # Аккаунт, который 3 запуска подряд отвечает ошибкой, отключается на неделю (видно в check).
+  max_per_run: 45
+  default_window_minutes: 60
+  max_window_minutes: 360
   min_interval_minutes: 0     # для apify поставьте 30–60, чтобы не платить за каждый запуск
   graph_api_version: ""       # пусто: версия по умолчанию вашего приложения Meta
   apify_actor: apify~instagram-post-scraper
   apify_input: {}             # дополнительные поля входа актора, если понадобятся
-  accounts:
-    # международная индустрия
-    - diet_prada
-    - stylenotcom
-    - hautelemode
-    - ideservecouture
-    - voguerunway
-    - voguebusiness
-    - bof
-    - wwd
-    - theimpression_
-    - databutmakeitfashion
-    - highsnobiety
-    - hypebeast
-    # российские аккаунты (артисты, бренды, редакторы, музеи) добавляйте так:
-    # - {name: имя_аккаунта, region: ru}
+  # Основная база: файл accounts.yaml (500+ аккаунтов по категориям). Здесь можно держать
+  # свои дополнительные; повторы с accounts.yaml отбрасываются.
+  accounts: []
+    # свои аккаунты сверх accounts.yaml, например:
+    # - {name: имя_аккаунта, region: ru, tier: 1}
     # - {name: имя_аккаунта, region: ru, feed: "https://ваш-rsshub/picnob/user/имя_аккаунта"}
 
 # ── Поиск по соцсетям нейросетью (social_search) ─────────────
 # Дополняет прямой Instagram: Threads и X не отдают чужие посты бесплатно,
 # поэтому их ищет нейросеть с веб-поиском (anthropic, openai, openrouter).
+# Основные списки Threads и X тоже в accounts.yaml; per_run: сколько аккаунтов каждой сети
+# нейросеть проверяет за запуск (по кругу).
 social_accounts:
-  instagram: ["diet_prada", "stylenotcom", "hautelemode", "ideservecouture"]
+  per_run: 12
+  instagram: []
   threads: ["diet_prada", "stylenotcom", "bof", "wwd", "voguebusiness"]
   x: ["wwd", "BoF", "VVFriedman"]
 

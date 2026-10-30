@@ -15,7 +15,7 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
-from . import config, pipeline
+from . import config, pipeline, rotation
 from .sources import google_news, instagram, rss, telegram
 from .state import State
 
@@ -40,6 +40,7 @@ def cmd_check(args) -> int:
     secrets = config.Secrets.from_env()
     src = cfg["sources"]
     rows: list[tuple[str, str, int]] = []
+    notes: list[str] = []
     with ThreadPoolExecutor(max_workers=12) as pool:
         jobs = []
         for ch in src.get("telegram") or []:
@@ -52,14 +53,30 @@ def cmd_check(args) -> int:
         for region, qs in (src.get("google_news") or {}).items():
             for q in qs or []:
                 jobs.append((f"gnews {region}", q[:50], pool.submit(google_news.fetch, q, region, 24 * 60)))
-        ig, warn = instagram.collect({**(cfg.get("instagram") or {}), "min_interval_minutes": 0}, secrets, pool)
+        st = State()  # память только читается: проверка не сдвигает очередь
+        ig_cfg = cfg.get("instagram") or {}
+        ig, warn = instagram.collect({**ig_cfg, "min_interval_minutes": 0}, secrets, pool, st)
         for w in warn:
             rows.append(("instagram", w, 0))
         by_acc: dict[str, int] = {}
         for it in ig:
-            by_acc[it.author] = by_acc.get(it.author, 0) + 1
-        for a in instagram.normalize_accounts((cfg.get("instagram") or {}).get("accounts")):
-            rows.append(("instagram", "@" + a["name"], by_acc.get(a["name"], 0)))
+            by_acc[(it.author or "").lower()] = by_acc.get((it.author or "").lower(), 0) + 1
+        all_ig = instagram.normalize_accounts(ig_cfg.get("accounts"))
+        limit = int(ig_cfg.get("max_per_run", 45))
+        batch = rotation.pick([a for a in all_ig if not a.get("feed")], State(), "ig", limit)
+        for a in batch + [a for a in all_ig if a.get("feed")]:
+            rows.append(("instagram", "@" + a["name"], by_acc.get(a["name"].lower(), 0)))
+        tier1 = sum(1 for a in all_ig if int(a.get("tier", 2)) == 1)
+        notes.append(f"Instagram: в базе {len(all_ig)} аккаунтов, tier 1: {tier1}, за запуск до {limit}; "
+                     f"полный круг очереди примерно за {rotation.cycle_hours(len(all_ig), tier1, limit)} ч. "
+                     "В таблице первая порция очереди.")
+        dead = rotation.disabled_list(st, "ig")
+        if dead:
+            notes.append("Отключены на неделю (ошибка 3 запуска подряд): " +
+                         "; ".join(f"@{n} ({e[:60]})" for n, e in dead))
+        soc = cfg.get("social_accounts") or {}
+        notes.append(f"Threads: {len(soc.get('threads') or [])}, X: {len(soc.get('x') or [])} аккаунтов; "
+                     f"нейросеть ищет по {soc.get('per_run', 12)} из каждого списка за запуск.")
         for kind, name, fut in jobs:
             rows.append((kind, name, len(fut.result())))
     width = max(len(r[1]) for r in rows) if rows else 10
@@ -70,7 +87,7 @@ def cmd_check(args) -> int:
         bad += not n
         lines.append(f"{mark}{kind:<11} {name:<{width}}  {n}")
     out = "\n".join(lines) + f"\n\nИсточников без данных: {bad} из {len(rows)}. " \
-          "Для google_news проверялось окно 24 часа; пустой ответ у узкого запроса бывает нормой."
+          "Для google_news проверялось окно 24 часа; пустой ответ у узкого запроса бывает нормой.\n" + "\n".join(notes)
     print(out)
     _summary("### Проверка источников\n\n```\n" + out + "\n```")
     return 0
