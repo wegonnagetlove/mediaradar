@@ -30,6 +30,7 @@ jobs:
       IG_USER_ID: ${{ secrets.IG_USER_ID }}
       APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
       PYTHONUNBUFFERED: "1"
+      RADAR_STATUS: "no"          # дежурный не шлёт в бот отчёт о каждой проверке
     steps:
       - name: Отметить начало
         run: echo "RELAY_START=$(date +%s)" >> "$GITHUB_ENV"

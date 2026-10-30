@@ -372,7 +372,8 @@ def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cf
                   f"свежих {report.fresh}, отобрано {report.picks}, отправлено {report.sent}.")
         if not report.picks:
             status += " Подходящих новостей за окно не нашлось."
-        other = [w for w in report.warnings if not w.startswith("Telegram")]
+        quiet = ("Telegram", "Instagram: нет ", "Расписание")  # служебное: видно в Actions, в бот не нужно
+        other = [w for w in report.warnings if not w.startswith(quiet)]
         if other:
             status += "\n\n" + "\n".join(f"• {w}" for w in other[:6])
         tg.send(status)

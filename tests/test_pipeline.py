@@ -386,3 +386,22 @@ def test_balance_gives_every_source_a_place():
     labels = [i.label for i in out]
     assert len(out) == 20 and labels.count("WWD") == 5 and labels.count("Dezeen") == 1
     assert labels[0] == "@breakingmash"                          # российские всё равно первыми
+
+
+
+def test_status_message_hides_setup_warnings(cfg, monkeypatch):
+    def fake_collect(cfg_, secrets_, state_, max_age, report_):
+        report_.warnings.append("Instagram: нет IG_ACCESS_TOKEN / IG_USER_ID, аккаунты без feed пропущены")
+        return []
+    monkeypatch.setattr(pipeline, "collect", fake_collect)
+    monkeypatch.setattr(pipeline, "LLM", FakeLLM)
+    sent = []
+    monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append(t) or True)
+    pipeline.run("A", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""), manual=True)
+    assert sent and "Instagram" not in sent[-1]
+
+
+def test_relay_does_not_send_status():
+    import yaml
+    wf = yaml.safe_load(open(config.ROOT / ".github/workflows/relay.yml", encoding="utf-8"))
+    assert wf["jobs"]["relay"]["env"]["RADAR_STATUS"] == "no"
