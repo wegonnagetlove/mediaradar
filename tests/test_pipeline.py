@@ -190,9 +190,10 @@ def test_relay_workflow_chains_itself():
     wf = yaml.safe_load(open(config.ROOT / ".github/workflows/relay.yml", encoding="utf-8"))
     steps = wf["jobs"]["relay"]["steps"]
     names = [st.get("name", "") for st in steps]
-    assert sum(n.startswith("Проверка ") for n in names) == 4
-    assert sum(n.startswith("Сохранить память после") for n in names) == 4
-    assert names.index("Запустить следующего дежурного") > names.index("Проверка 4")
+    assert sum(n.startswith("Проверка ") for n in names) == 12
+    assert sum(n.startswith("Сохранить память после") for n in names) == 12
+    assert names.index("Запустить следующего дежурного") > names.index("Проверка 12")
+    assert "* 300 ))" in steps[names.index("Ждать до проверки 12")]["run"]
     assert wf["permissions"]["actions"] == "write"
     assert "relay.yml/dispatches" in steps[names.index("Запустить следующего дежурного")]["run"]
     manual = yaml.safe_load(open(config.ROOT / ".github/workflows/radar.yml", encoding="utf-8"))

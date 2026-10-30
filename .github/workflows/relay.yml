@@ -1,5 +1,5 @@
-# Дежурство: радар сам будит себя каждые 15 минут, без внешних сервисов.
-# Один запуск длится около часа: 4 проверки с интервалом 15 минут, после каждой сохраняется память,
+# Дежурство: радар сам будит себя каждые 5 минут, без внешних сервисов.
+# Один запуск длится около часа: 12 проверок с интервалом 5 минут, после каждой сохраняется память,
 # в конце запускается следующий дежурный. Если цепочка оборвётся, расписание ниже её перезапустит.
 # Что делать в каждой проверке (тишина ночью, утренний выпуск, посты), радар решает сам по config.yaml.
 # Остановить дежурство: Actions → «Радар: дежурство» → ⋯ → Disable workflow.
@@ -21,7 +21,7 @@ permissions:
 jobs:
   relay:
     runs-on: ubuntu-latest
-    timeout-minutes: 70
+    timeout-minutes: 75
     env:
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -52,7 +52,8 @@ jobs:
 
       - name: Проверка 1
         continue-on-error: true
-        run: python -m radar -v run --mode B
+        timeout-minutes: 4
+        run: python -m radar run --mode B
 
       - name: Сохранить память после проверки 1
         if: always()
@@ -63,13 +64,14 @@ jobs:
 
       - name: Ждать до проверки 2
         run: |
-          target=$(( RELAY_START + 1 * 900 ))
+          target=$(( RELAY_START + 1 * 300 ))
           now=$(date +%s)
           if [ $target -gt $now ]; then sleep $(( target - now )); fi
 
       - name: Проверка 2
         continue-on-error: true
-        run: python -m radar -v run --mode B
+        timeout-minutes: 4
+        run: python -m radar run --mode B
 
       - name: Сохранить память после проверки 2
         if: always()
@@ -80,13 +82,14 @@ jobs:
 
       - name: Ждать до проверки 3
         run: |
-          target=$(( RELAY_START + 2 * 900 ))
+          target=$(( RELAY_START + 2 * 300 ))
           now=$(date +%s)
           if [ $target -gt $now ]; then sleep $(( target - now )); fi
 
       - name: Проверка 3
         continue-on-error: true
-        run: python -m radar -v run --mode B
+        timeout-minutes: 4
+        run: python -m radar run --mode B
 
       - name: Сохранить память после проверки 3
         if: always()
@@ -97,13 +100,14 @@ jobs:
 
       - name: Ждать до проверки 4
         run: |
-          target=$(( RELAY_START + 3 * 900 ))
+          target=$(( RELAY_START + 3 * 300 ))
           now=$(date +%s)
           if [ $target -gt $now ]; then sleep $(( target - now )); fi
 
       - name: Проверка 4
         continue-on-error: true
-        run: python -m radar -v run --mode B
+        timeout-minutes: 4
+        run: python -m radar run --mode B
 
       - name: Сохранить память после проверки 4
         if: always()
@@ -111,6 +115,150 @@ jobs:
         with:
           path: state
           key: radar-state-${{ github.run_id }}-4
+
+      - name: Ждать до проверки 5
+        run: |
+          target=$(( RELAY_START + 4 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 5
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 5
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-5
+
+      - name: Ждать до проверки 6
+        run: |
+          target=$(( RELAY_START + 5 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 6
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 6
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-6
+
+      - name: Ждать до проверки 7
+        run: |
+          target=$(( RELAY_START + 6 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 7
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 7
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-7
+
+      - name: Ждать до проверки 8
+        run: |
+          target=$(( RELAY_START + 7 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 8
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 8
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-8
+
+      - name: Ждать до проверки 9
+        run: |
+          target=$(( RELAY_START + 8 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 9
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 9
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-9
+
+      - name: Ждать до проверки 10
+        run: |
+          target=$(( RELAY_START + 9 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 10
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 10
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-10
+
+      - name: Ждать до проверки 11
+        run: |
+          target=$(( RELAY_START + 10 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 11
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 11
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-11
+
+      - name: Ждать до проверки 12
+        run: |
+          target=$(( RELAY_START + 11 * 300 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 12
+        continue-on-error: true
+        timeout-minutes: 4
+        run: python -m radar run --mode B
+
+      - name: Сохранить память после проверки 12
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-12
 
       - name: Ждать до конца часа
         run: |
