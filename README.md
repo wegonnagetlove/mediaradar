@@ -14,18 +14,11 @@
 
 Радар запускается каждые 15 минут круглосуточно и сам решает по московскому времени, что делать: ночью молчит, первый запуск после 06:55 делает утренний выпуск, дальше присылает посты. Время меняется в `config.yaml → schedule`.
 
-### Внешний будильник (обязательно)
+### Дежурство
 
-Расписание GitHub работает «по возможности»: запуски опаздывают на часы или пропускаются. Поэтому радар будит бесплатный сервис [cron-job.org](https://cron-job.org), а расписание GitHub остаётся запасным.
+Расписание GitHub работает «по возможности» и пропускает запуски, поэтому радар будит себя сам: workflow «Радар: дежурство» (`relay.yml`) работает около часа, проверяет новости каждые 15 минут, сохраняет память после каждой проверки и в конце запускает следующего дежурного. Если цепочка оборвётся, раз в два часа её перезапускает расписание. Остановить: Actions → «Радар: дежурство» → ⋯ → Disable workflow.
 
-1. **Ключ GitHub для будильника.** [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new): название `cron`, срок до года, Repository access → Only select repositories → `mediaradar`, Permissions → Repository → **Actions: Read and write**. Generate token, скопировать.
-2. **Задание на cron-job.org.** Зарегистрироваться, Create cronjob:
-   - URL: `https://api.github.com/repos/wegonnagetlove/mediaradar/actions/workflows/radar.yml/dispatches`
-   - Execution schedule: Every 15 minutes
-   - Advanced → Request method: **POST**
-   - Headers: `Authorization` = `Bearer <ключ из шага 1>`, `Accept` = `application/vnd.github+json`
-   - Request body: `{"ref":"main","inputs":{"mode":"B","action":"run","status":"no"}}`
-3. Save. Успешный вызов возвращает код **204**; история видна в разделе History задания.
+Это непрерывная работа Actions, а GitHub рассчитывает их на сборку и проверку кода, поэтому формально это серая зона его правил. Надёжная альтернатива по правилам: отключить дежурство и будить радар внешним сервисом [cron-job.org](https://cron-job.org) запросом POST на `https://api.github.com/repos/wegonnagetlove/mediaradar/actions/workflows/radar.yml/dispatches` каждые 15 минут с заголовками `Authorization: Bearer <ключ GitHub с правом Actions: Read and write>`, `Accept: application/vnd.github+json` и телом `{"ref":"main","inputs":{"mode":"B","action":"run","status":"no"}}`.
 
 ## Как это работает
 

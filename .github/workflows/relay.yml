@@ -1,0 +1,140 @@
+# Дежурство: радар сам будит себя каждые 15 минут, без внешних сервисов.
+# Один запуск длится около часа: 4 проверки с интервалом 15 минут, после каждой сохраняется память,
+# в конце запускается следующий дежурный. Если цепочка оборвётся, расписание ниже её перезапустит.
+# Что делать в каждой проверке (тишина ночью, утренний выпуск, посты), радар решает сам по config.yaml.
+# Остановить дежурство: Actions → «Радар: дежурство» → ⋯ → Disable workflow.
+name: "Радар: дежурство"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 */2 * * *"   # запасной перезапуск цепочки раз в 2 часа
+
+concurrency:
+  group: radar-relay
+  cancel-in-progress: false   # ждущий запуск один: повтор от расписания заменяется следующим дежурным
+
+permissions:
+  contents: read
+  actions: write              # чтобы запустить следующего дежурного
+
+jobs:
+  relay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    env:
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+      IG_USER_ID: ${{ secrets.IG_USER_ID }}
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Отметить начало
+        run: echo "RELAY_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Память радара
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}
+          restore-keys: radar-state-
+
+      - name: Проверка 1
+        continue-on-error: true
+        run: python -m radar -v run --mode B
+
+      - name: Сохранить память после проверки 1
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-1
+
+      - name: Ждать до проверки 2
+        run: |
+          target=$(( RELAY_START + 1 * 900 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 2
+        continue-on-error: true
+        run: python -m radar -v run --mode B
+
+      - name: Сохранить память после проверки 2
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-2
+
+      - name: Ждать до проверки 3
+        run: |
+          target=$(( RELAY_START + 2 * 900 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 3
+        continue-on-error: true
+        run: python -m radar -v run --mode B
+
+      - name: Сохранить память после проверки 3
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-3
+
+      - name: Ждать до проверки 4
+        run: |
+          target=$(( RELAY_START + 3 * 900 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Проверка 4
+        continue-on-error: true
+        run: python -m radar -v run --mode B
+
+      - name: Сохранить память после проверки 4
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: radar-state-${{ github.run_id }}-4
+
+      - name: Ждать до конца часа
+        run: |
+          target=$(( RELAY_START + 3600 - 120 ))
+          now=$(date +%s)
+          if [ $target -gt $now ]; then sleep $(( target - now )); fi
+
+      - name: Запустить следующего дежурного
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/relay.yml/dispatches" \
+            -d '{"ref":"${{ github.ref_name }}"}'
+          echo "Следующий дежурный запущен"
+
+      - name: Архив выпусков
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_id }}
+          path: digests/
+          if-no-files-found: ignore
+          retention-days: 7

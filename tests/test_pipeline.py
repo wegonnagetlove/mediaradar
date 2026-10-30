@@ -185,12 +185,18 @@ def test_digest_prompt_formats():
                                       candidates="[]", competitor_posts="")
 
 
-def test_schedule_covers_moscow_day():
+def test_relay_workflow_chains_itself():
     import yaml
-    wf = yaml.safe_load(open(config.ROOT / ".github/workflows/radar.yml", encoding="utf-8"))
-    crons = [c["cron"] for c in wf[True]["schedule"]]  # PyYAML читает ключ on как True
-    assert crons == ["7,22,37,52 * * * *"]
-    assert "status" in wf[True]["workflow_dispatch"]["inputs"]
+    wf = yaml.safe_load(open(config.ROOT / ".github/workflows/relay.yml", encoding="utf-8"))
+    steps = wf["jobs"]["relay"]["steps"]
+    names = [st.get("name", "") for st in steps]
+    assert sum(n.startswith("Проверка ") for n in names) == 4
+    assert sum(n.startswith("Сохранить память после") for n in names) == 4
+    assert names.index("Запустить следующего дежурного") > names.index("Проверка 4")
+    assert wf["permissions"]["actions"] == "write"
+    assert "relay.yml/dispatches" in steps[names.index("Запустить следующего дежурного")]["run"]
+    manual = yaml.safe_load(open(config.ROOT / ".github/workflows/radar.yml", encoding="utf-8"))
+    assert "schedule" not in manual[True] and "status" in manual[True]["workflow_dispatch"]["inputs"]
 
 
 def test_openai_uses_responses_api(monkeypatch):
