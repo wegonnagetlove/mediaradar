@@ -327,6 +327,7 @@ def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Teleg
         return _run_digest(cfg, mode, llm, cands, now, tg, dry_run, report, state)
 
     posts_out: list[tuple[dict, str]] = []
+    undelivered: set[str] = set()
     picks: list[dict] = []
     if cands:
         comp = competitor_material(cfg, state)
@@ -353,18 +354,25 @@ def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Teleg
             max_photos = int(notify_cfg.get("max_photos", 4)) if notify_cfg.get("photos", True) else 0
             for p, body in posts_out:
                 it = p["_item"]
+                delivered = True
                 if notify_cfg.get("telegram") and tg.ready:
-                    tg.send_post(body, footer=source_footer(it, p) if notify_cfg.get("source_link", True) else "",
-                                 images=(it.extra.get("images") or [])[:max_photos], link=it.url)
-                state.mark_sent(body.lstrip("⚡️ ").split("\n", 1)[0][:160], it.url)
-            report.sent = len(posts_out)
+                    delivered = tg.send_post(body, footer=source_footer(it, p) if notify_cfg.get("source_link", True) else "",
+                                             images=(it.extra.get("images") or [])[:max_photos], link=it.url)
+                elif notify_cfg.get("telegram"):
+                    delivered = False  # бот не настроен: новость не теряем, попробуем в следующий раз
+                if delivered:
+                    state.mark_sent(body.lstrip("⚡️ ").split("\n", 1)[0][:160], it.url)
+                    report.sent += 1
+                else:
+                    undelivered.add(it.id)
     else:
         report.digest = "Пусто"
         if not dry_run and notify_cfg.get("send_empty") and tg.ready:
             tg.send(f"Пусто ({now.astimezone(tz):%H:%M})")
 
     if not dry_run:
-        state.mark_seen(i.id for i in cands)  # что не влезло в лимит, уйдёт на отбор в следующий раз
+        # что не влезло в лимит или не дошло до Telegram, уйдёт на отбор в следующий раз
+        state.mark_seen(i.id for i in cands if i.id not in undelivered)
         state.save()
         _save_digest(cfg, report, now)
     return report

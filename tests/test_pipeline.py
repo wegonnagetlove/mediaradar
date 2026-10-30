@@ -294,3 +294,7 @@ def test_send_errors_are_reported(cfg, monkeypatch):
     monkeypatch.setattr(pipeline.Telegram, "send_post", broken)
     rep = pipeline.run("B", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""))
     assert rep.failed and any("TELEGRAM_CHAT_ID" in w for w in rep.warnings)
+    assert rep.sent == 0
+    # недоставленная новость не помечена как увиденная: следующий запуск попробует снова
+    rep2 = pipeline.run("B", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""))
+    assert rep2.candidates == 1
