@@ -53,3 +53,29 @@ def test_no_photo_uses_link_preview(monkeypatch):
 
 def test_visible_len_ignores_markup():
     assert notify.visible_len('Текст &amp; <a href="https://very/long">Источник</a>') == len("Текст & Источник")
+
+
+
+def test_explain_common_errors():
+    assert "TELEGRAM_BOT_TOKEN" in notify.explain(401, '{"description":"Unauthorized"}')
+    assert "TELEGRAM_CHAT_ID" in notify.explain(400, '{"description":"Bad Request: chat not found"}')
+    assert "Старт" in notify.explain(403, '{"description":"Forbidden: bot can\'t initiate conversation with a user"}')
+
+
+def test_check_detects_bot_id_as_chat_id():
+    assert "номер самого бота" in notify.Telegram("9096675184:AAA", "9096675184").check()
+    assert "TELEGRAM_CHAT_ID" in notify.Telegram("1:A", "").check()
+
+
+def test_html_parse_error_falls_back_to_plain(monkeypatch):
+    calls = []
+
+    class R:
+        def __init__(self, code, text=""):
+            self.status_code, self.text = code, text
+    def post(url, **k):
+        calls.append(k)
+        return R(400, "Bad Request: can't parse entities") if len(calls) == 1 else R(200)
+    monkeypatch.setattr(notify.net, "post", post)
+    tg = notify.Telegram("t", "c")
+    assert tg.send("<b>сломано", html=True) and "parse_mode" not in calls[1]["json"] and not tg.errors

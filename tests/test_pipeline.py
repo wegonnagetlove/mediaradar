@@ -22,6 +22,7 @@ def cfg(tmp_path, monkeypatch):
     c["social_search"] = False
     c["notify"]["save_digest"] = False
     monkeypatch.setattr(pipeline, "State", lambda: State(tmp_path / "seen.json"))
+    monkeypatch.setattr(pipeline.Telegram, "check", lambda self: "")  # без сети
     return c
 
 
@@ -252,3 +253,44 @@ def test_rotated_account_window(cfg, tmp_path):
     rotation.polled(st, "ig", "x", now_utc() - timedelta(hours=3))
     assert 190 <= rotation.window_minutes(st, "ig", "x", 60, 360) <= 200
     assert rotation.window_minutes(st, "ig", "new", 60, 360) == 60
+
+
+
+def test_telegram_problem_fails_run_with_clear_reason(cfg, monkeypatch):
+    monkeypatch.setattr(pipeline.Telegram, "check", lambda self: "бот не может написать первым: нажмите «Старт»")
+    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline, "LLM", FakeLLM)
+    rep = pipeline.run("B", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""))
+    assert rep.failed and "Старт" in rep.warnings[0]
+
+
+def test_manual_run_sends_status(cfg, monkeypatch):
+    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline, "LLM", FakeLLM)
+    sent = []
+    monkeypatch.setattr(pipeline.Telegram, "send", lambda self, t, **k: sent.append(t) or True)
+    rep = pipeline.run("A", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""), manual=True)
+    assert not rep.failed and sent and sent[-1].startswith("Радар работает. Режим A")
+    assert "не нашлось" in sent[-1]
+
+
+def test_send_errors_are_reported(cfg, monkeypatch):
+    items = [mk("Designer exits house", 15)]
+    monkeypatch.setattr(pipeline, "collect", lambda *a, **k: items)
+    monkeypatch.setattr(pipeline, "competitor_material", lambda *a, **k: [])
+    monkeypatch.setattr(pipeline.article, "fetch", lambda url: None)
+
+    class OneLLM(FakeLLM):
+        def complete(self, system, user, **k):
+            if "КАНДИДАТЫ" in user:
+                c = json.loads(user.split("КАНДИДАТЫ (JSON)\n", 1)[1].split("\n\nПОСЛЕДНИЕ", 1)[0])[0]
+                return json.dumps({"picks": [{"id": c["id"], "exclusive": True}]})
+            return super().complete(system, user, **k)
+    monkeypatch.setattr(pipeline, "LLM", OneLLM)
+
+    def broken(self, text, **k):
+        self._error("sendMessage", 400, '{"ok":false,"description":"Bad Request: chat not found"}')
+        return False
+    monkeypatch.setattr(pipeline.Telegram, "send_post", broken)
+    rep = pipeline.run("B", cfg=cfg, secrets=config.Secrets("key", "1:abc", "5", "", "", ""))
+    assert rep.failed and any("TELEGRAM_CHAT_ID" in w for w in rep.warnings)

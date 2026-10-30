@@ -33,6 +33,7 @@ class Report:
     picks: int = 0
     sent: int = 0
     digest: str = ""
+    failed: bool = False
 
     def summary(self) -> str:
         src = ", ".join(f"{k}: {v}" for k, v in self.collected.items())
@@ -252,20 +253,44 @@ def order(picks: list[dict]) -> list[dict]:
 
 # ── запуск ───────────────────────────────────────────────────────────────
 
-def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cfg=None, secrets=None) -> Report:
+def run(mode_name: str = "B", *, dry_run: bool = False, no_llm: bool = False, cfg=None, secrets=None,
+        manual: bool = False) -> Report:
+    """Обёртка: проверка связи с Telegram, сам запуск, итоговый отчёт и ошибки отправки."""
     cfg = cfg or config.load()
     secrets = secrets or config.Secrets.from_env()
+    now = now_utc()
+    report = Report(mode=mode_name.upper(), started=now)
+    tg = Telegram(secrets.telegram_bot_token, secrets.telegram_chat_id,
+                  silent=bool(cfg["notify"].get("silent_night")) and is_night(now.astimezone(cfg.tz)))
+    use_tg = bool(cfg["notify"].get("telegram")) and not dry_run
+    if use_tg:
+        problem = tg.check()
+        if problem:
+            report.warnings.append(f"Telegram: {problem}")
+            report.failed = True
+            tg.token = ""  # дальше не пытаемся слать в заведомо неверный чат
+    _run(mode_name, dry_run=dry_run, no_llm=no_llm, cfg=cfg, secrets=secrets, tg=tg, report=report, now=now)
+    for e in tg.errors:
+        report.warnings.append(f"Telegram: {e}")
+        report.failed = True
+    if manual and use_tg and tg.ready and not report.failed:
+        status = (f"Радар работает. Режим {report.mode}: собрано {sum(report.collected.values())}, "
+                  f"свежих {report.fresh}, отобрано {report.picks}, отправлено {report.sent}.")
+        if not report.picks:
+            status += " Подходящих новостей за окно не нашлось."
+        other = [w for w in report.warnings if not w.startswith("Telegram")]
+        if other:
+            status += "\n\n" + "\n".join(f"• {w}" for w in other[:6])
+        tg.send(status)
+    return report
+
+
+def _run(mode_name: str, *, dry_run: bool, no_llm: bool, cfg, secrets, tg: Telegram, report: Report, now) -> Report:
     mode = cfg.mode(mode_name)
     max_age = int(mode["max_age_minutes"])
-    now = now_utc()
     tz = cfg.tz
-    report = Report(mode=mode_name.upper(), started=now)
     state = State()
     notify_cfg = cfg["notify"]
-    tg = Telegram(secrets.telegram_bot_token, secrets.telegram_chat_id,
-                  silent=bool(notify_cfg.get("silent_night")) and is_night(now.astimezone(tz)))
-    if notify_cfg.get("telegram") and not tg.ready and not dry_run:
-        report.warnings.append("нет TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID: результат будет только в логе и архиве")
 
     if cfg.get("engine") == "agent" and not no_llm:
         return _run_agent(cfg, secrets, mode_name, now, tg, dry_run, report, state)

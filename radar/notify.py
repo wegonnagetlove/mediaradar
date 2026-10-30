@@ -45,9 +45,31 @@ def is_night(now_local: datetime) -> bool:
     return 1 <= now_local.hour < 8
 
 
+def explain(status: int, text: str) -> str:
+    """Ошибка Telegram человеческими словами: что именно поправить."""
+    low = (text or "").lower()
+    if status == 401 or "unauthorized" in low:
+        return "Telegram не принял TELEGRAM_BOT_TOKEN: токен отозван или скопирован не полностью. Скопируйте его заново в BotFather (кнопка Copy) и обновите секрет"
+    if "chat not found" in low:
+        return "Telegram не нашёл чат TELEGRAM_CHAT_ID: проверьте число в секрете (ваш Id из @userinfobot, а не номер бота) и нажмите «Старт» у своего бота"
+    if status == 403 or "blocked" in low or "initiate conversation" in low:
+        return "бот не может написать первым: откройте своего бота в Telegram и нажмите «Старт»"
+    if "parse entities" in low:
+        return "Telegram не разобрал разметку сообщения"
+    return f"Telegram ответил HTTP {status}: {text[:200]}"
+
+
 class Telegram:
     def __init__(self, token: str, chat_id: str, *, silent: bool = False):
         self.token, self.chat_id, self.silent = token, chat_id, silent
+        self.errors: list[str] = []
+        self.sent = 0
+
+    def _error(self, method: str, status: int, text: str) -> None:
+        msg = explain(status, text)
+        log.error("Telegram %s: %s", method, msg)
+        if msg not in self.errors:
+            self.errors.append(msg)
 
     @property
     def ready(self) -> bool:
@@ -64,18 +86,51 @@ class Telegram:
             }
             if html:
                 body["parse_mode"] = "HTML"
-            r = net.post(f"https://api.telegram.org/bot{self.token}/sendMessage", json=body, timeout=30)
-            if r.status_code != 200:
-                log.error("Telegram: HTTP %s %s", r.status_code, r.text[:200])
+            try:
+                r = net.post(f"https://api.telegram.org/bot{self.token}/sendMessage", json=body, timeout=30)
+            except Exception as e:  # noqa: BLE001
+                self._error("sendMessage", 0, str(e))
                 ok = False
+                continue
+            if r.status_code != 200 and html and "parse entities" in r.text.lower():
+                body.pop("parse_mode")  # разметка не разобралась: шлём как обычный текст
+                r = net.post(f"https://api.telegram.org/bot{self.token}/sendMessage", json=body, timeout=30)
+            if r.status_code != 200:
+                self._error("sendMessage", r.status_code, r.text)
+                ok = False
+            else:
+                self.sent += 1
         return ok
 
     def _api(self, method: str, *, data: dict, files: dict | None = None) -> bool:
-        r = net.post(f"https://api.telegram.org/bot{self.token}/{method}", data=data, files=files, timeout=60)
-        if r.status_code != 200:
-            log.error("Telegram %s: HTTP %s %s", method, r.status_code, r.text[:200])
+        url = f"https://api.telegram.org/bot{self.token}/{method}"
+        try:
+            r = net.post(url, data=data, files=files, timeout=60)
+            if r.status_code != 200 and data.get("parse_mode") and "parse entities" in r.text.lower():
+                data = {k: v for k, v in data.items() if k != "parse_mode"}
+                r = net.post(url, data=data, files=files, timeout=60)
+        except Exception as e:  # noqa: BLE001
+            self._error(method, 0, str(e))
             return False
+        if r.status_code != 200:
+            self._error(method, r.status_code, r.text)
+            return False
+        self.sent += 1
         return True
+
+    def check(self) -> str:
+        """Проверка связи до запуска: '' если всё в порядке, иначе понятное объяснение."""
+        if not self.token:
+            return "нет секрета TELEGRAM_BOT_TOKEN"
+        if not self.chat_id:
+            return "нет секрета TELEGRAM_CHAT_ID"
+        if self.token.split(":", 1)[0] == self.chat_id.lstrip("-"):
+            return "в TELEGRAM_CHAT_ID записан номер самого бота; нужен ваш Id из @userinfobot"
+        try:
+            r = net.post(f"https://api.telegram.org/bot{self.token}/getChat", data={"chat_id": self.chat_id}, timeout=30)
+        except Exception as e:  # noqa: BLE001
+            return f"нет связи с Telegram: {e}"
+        return "" if r.status_code == 200 else explain(r.status_code, r.text)
 
     def send_post(self, text: str, *, footer: str = "", images: list[str] | None = None, link: str = "") -> bool:
         """Дневной пост: фото с подписью; если фото нет, текст с превью ссылки на источник."""

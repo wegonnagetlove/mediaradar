@@ -28,10 +28,16 @@ def _summary(text: str) -> None:
 
 
 def cmd_run(args) -> int:
-    rep = pipeline.run(args.mode, dry_run=args.dry_run, no_llm=args.no_llm)
+    manual = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
+    rep = pipeline.run(args.mode, dry_run=args.dry_run, no_llm=args.no_llm, manual=manual)
     print(rep.summary())
     print("\n" + (rep.digest or "Пусто"))
-    _summary("### Радар\n\n```\n" + rep.summary() + "\n```\n\n" + (rep.digest or "Пусто"))
+    head = "### Радар: ошибка\n\n" if rep.failed else "### Радар\n\n"
+    problems = "\n".join(f"- **{w}**" for w in rep.warnings) + "\n\n" if rep.failed else ""
+    _summary(head + problems + "```\n" + rep.summary() + "\n```\n\n" + (rep.digest or "Пусто"))
+    if rep.failed:
+        print("\nОШИБКА: " + "; ".join(rep.warnings), file=sys.stderr)
+        return 1
     return 0
 
 
