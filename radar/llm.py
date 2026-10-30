@@ -49,8 +49,8 @@ class LLM:
             raise LLMError(f"провайдер {self.provider} не умеет искать в вебе")
         if self.provider == "anthropic":
             return self._anthropic(system, user, web_search, max_searches)
-        if self.provider == "openai" and web_search:
-            return self._openai_responses(system, user)
+        if self.provider == "openai":  # новые модели OpenAI работают через Responses API
+            return self._openai_responses(system, user, web_search)
         return self._chat(system, user, web_search)
 
     # ── Anthropic ────────────────────────────────────────────────────────
@@ -80,14 +80,15 @@ class LLM:
         return "".join(texts).strip()
 
     # ── OpenAI Responses (веб-поиск) ─────────────────────────────────────
-    def _openai_responses(self, system: str, user: str) -> str:
+    def _openai_responses(self, system: str, user: str, web: bool = False) -> str:
         body = {
             "model": self.model,
             "instructions": system,
             "input": user,
-            "tools": [{"type": self.cfg.get("openai_web_search_tool", "web_search")}],
             "max_output_tokens": int(self.cfg.get("max_tokens", 6000)),
         }
+        if web:
+            body["tools"] = [{"type": self.cfg.get("openai_web_search_tool", "web_search")}]
         r = net.post(f"{OPENAI_COMPAT['openai']}/responses", json=body,
                      headers={"Authorization": f"Bearer {self.key}"}, timeout=300)
         if r.status_code != 200:

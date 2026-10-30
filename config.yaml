@@ -39,8 +39,9 @@ strict_time: false
 # provider: anthropic | openai | gemini | deepseek | openrouter | custom
 # Для custom задайте base_url любого OpenAI-совместимого API (Mistral, Groq, YandexGPT-шлюз, локальная Ollama).
 llm:
-  provider: anthropic
-  model: claude-sonnet-5-5          # для качества текста можно claude-opus-5-5
+  provider: openai
+  model: gpt-6-astra                # самая сильная модель OpenAI; дешевле: gpt-6-luna
+                                    # для Claude: provider: anthropic, model: claude-sonnet-5-5
   base_url: ""                      # только для custom
   temperature: 0.6
   max_tokens: 6000

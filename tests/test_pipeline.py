@@ -188,3 +188,27 @@ def test_schedule_covers_moscow_day():
     wf = yaml.safe_load(open(config.ROOT / ".github/workflows/radar.yml", encoding="utf-8"))
     crons = [c["cron"] for c in wf[True]["schedule"]]  # PyYAML читает ключ on как True
     assert "55 3 * * *" in crons and "*/15 5-20 * * *" in crons
+
+
+def test_openai_uses_responses_api(monkeypatch):
+    calls = []
+
+    class R:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {"output": [{"type": "message", "content": [{"type": "output_text", "text": '{"ok": 1}'}]}]}
+
+    monkeypatch.setattr(llm.net, "post", lambda url, **k: calls.append((url, k["json"])) or R())
+    m = llm.LLM({"provider": "openai", "model": "gpt-6-astra", "temperature": 0.6}, "key")
+    assert m.complete("sys", "user") == '{"ok": 1}'
+    assert m.complete("sys", "user", web_search=True) == '{"ok": 1}'
+    (u1, b1), (u2, b2) = calls
+    assert u1.endswith("/responses") and "tools" not in b1 and "temperature" not in b1
+    assert b2["tools"] == [{"type": "web_search"}]
+
+
+def test_config_uses_openai():
+    c = config.load()
+    assert c["llm"]["provider"] == "openai" and c["llm"]["model"] == "gpt-6-astra"
